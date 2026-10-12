@@ -1,25 +1,39 @@
-import React, { useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Animated,
-  ActivityIndicator,
-} from 'react-native';
-import { router } from 'expo-router';
-import { Plus, Clock, ChevronRight, MessageSquare, Users, Mic, Type, Trash2 } from 'lucide-react-native';
-import { useSessions } from '@/context/SessionContext';
 import Colors from '@/constants/colors';
-import { CATEGORY_CONFIG, SessionCategory } from '@/types/session';
+import { useSessions } from '@/context/SessionContext';
+import { CATEGORY_CONFIG } from '@/types/session';
 import * as Haptics from 'expo-haptics';
-import { Alert, Platform } from 'react-native';
+import { router } from 'expo-router';
+import { ChevronRight, Clock, MessageSquare, Mic, Plus, Quote, Sparkles, Trash2, Type, Users } from 'lucide-react-native';
+import React, { useEffect, useRef } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+const QUOTES = [
+  { text: "Communication is the solvent of all problems and is the foundation for personal development.", author: "Peter Shepherd" },
+  { text: "The most important thing in communication is hearing what isn't said.", author: "Peter Drucker" },
+  { text: "Effective communication is 20% what you know and 80% how you feel about what you know.", author: "Jim Rohn" },
+  { text: "Speak clearly, if you speak at all; carve every word before you let it fall.", author: "Oliver Wendell Holmes" },
+  { text: "The art of communication is the language of leadership.", author: "James Humes" },
+  { text: "Good communication is as stimulating as black coffee, and just as hard to sleep after.", author: "Anne Morrow Lindbergh" },
+  { text: "Your ability to communicate is a direct reflection of your ability to lead.", author: "Unknown" },
+  { text: "Communication works for those who work at it.", author: "John Powell" }
+];
 
 export default function HomeScreen() {
   const { sessions, isLoading, deleteSession } = useSessions();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+
+  const quote = useRef(QUOTES[Math.floor(Math.random() * QUOTES.length)]).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -120,16 +134,27 @@ export default function HomeScreen() {
             </Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.heroButton}
-          onPress={handleCreateSession}
-          activeOpacity={0.8}
-          testID="create-session-hero"
-        >
-          <Plus size={17} color="#FFFFFF" />
-          <Text style={styles.heroButtonText}>New GD Session</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row' }}>
+          <TouchableOpacity
+            style={[styles.heroButton, { flex: 1 }]}
+            onPress={handleCreateSession}
+            activeOpacity={0.8}
+            testID="create-session-hero"
+          >
+            <Plus size={17} color="#FFFFFF" />
+            <Text style={styles.heroButtonText}>Start GD Practice Session</Text>
+          </TouchableOpacity>
+        </View>
       </Animated.View>
+
+      <View style={styles.quoteCard}>
+        <View style={styles.quoteHeader}>
+          <Quote size={16} color={Colors.light.tint} />
+          <Text style={styles.quoteLabel}>Daily Inspiration</Text>
+        </View>
+        <Text style={styles.quoteText}>"{quote.text}"</Text>
+        <Text style={styles.quoteAuthor}>— {quote.author}</Text>
+      </View>
 
       {sessions.length > 0 && (
         <View style={styles.statsRow}>
@@ -180,7 +205,7 @@ export default function HomeScreen() {
         </Animated.View>
       ) : (
         sessions.map((session, index) => {
-          const config = CATEGORY_CONFIG[session.category];
+          const config = CATEGORY_CONFIG[session.category] || { label: session.category || 'Legacy App', emoji: '📁', color: '#6B7280' };
           return (
             <TouchableOpacity
               key={session.id}
@@ -226,6 +251,19 @@ export default function HomeScreen() {
                     {session.entries.length} responses
                   </Text>
                 </View>
+                {session.finalReport ? (
+                  <>
+                    <View style={styles.metaDot} />
+                    <View style={styles.reportBadge}>
+                      <Sparkles size={11} color={Colors.light.tint} />
+                      <Text style={styles.reportBadgeText}>
+                        {session.reportMetrics?.readinessScore !== undefined
+                          ? `Score: ${session.reportMetrics.readinessScore}/100`
+                          : 'Report Ready'}
+                      </Text>
+                    </View>
+                  </>
+                ) : null}
                 <View style={styles.metaDot} />
                 <View style={styles.metaItem}>
                   <Clock size={11} color={Colors.light.textSecondary} />
@@ -266,6 +304,52 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 22,
     marginBottom: 20,
+    shadowColor: Colors.light.tint,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  quoteCard: {
+    backgroundColor: Colors.light.surface,
+    padding: 18,
+    borderRadius: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.light.tint,
+    shadowColor: Colors.light.cardShadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  quoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  quoteLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.light.tint,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  quoteText: {
+    fontSize: 15,
+    color: Colors.light.text,
+    lineHeight: 22,
+    marginBottom: 6,
+    fontStyle: 'italic',
+  },
+  quoteAuthor: {
+    fontSize: 12,
+    color: Colors.light.textSecondary,
+    fontWeight: '600',
+    textAlign: 'right',
   },
   heroTop: {
     flexDirection: 'row',
@@ -276,7 +360,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
@@ -292,14 +376,14 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.9)',
     lineHeight: 18,
   },
   heroButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
     borderRadius: 14,
     paddingVertical: 13,
     gap: 7,
@@ -321,7 +405,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.light.borderLight,
+    borderColor: Colors.light.border,
+    shadowColor: Colors.light.cardShadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
     gap: 4,
   },
   statValue: {
@@ -403,7 +492,12 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: Colors.light.borderLight,
+    borderColor: Colors.light.border,
+    shadowColor: Colors.light.cardShadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 1,
   },
   sessionTop: {
     flexDirection: 'row',
@@ -421,7 +515,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: Colors.light.background,
+    backgroundColor: Colors.light.surfaceElevated,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -460,7 +554,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.light.background,
+    backgroundColor: '#FEE2E2',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -494,6 +588,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.textSecondary,
     marginHorizontal: 8,
     opacity: 0.4,
+  },
+  reportBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.light.tint + '18',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  reportBadgeText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: Colors.light.tint,
   },
   bottomSpacer: {
     height: 30,

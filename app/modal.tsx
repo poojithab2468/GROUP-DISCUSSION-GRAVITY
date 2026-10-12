@@ -64,15 +64,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   closeButton: {
-    backgroundColor: "#007AFF",
+    backgroundColor: '#0D9488',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 10,
     minWidth: 100,
   },
   closeButtonText: {
-    color: "white",
-    fontWeight: "600" as const,
-    textAlign: "center",
+    color: 'white',
+    fontWeight: '600' as const,
+    textAlign: 'center',
   },
 });

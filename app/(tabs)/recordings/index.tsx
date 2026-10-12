@@ -16,7 +16,7 @@ import * as Haptics from 'expo-haptics';
 interface FlatEntry {
   id: string;
   text: string;
-  inputMode: 'text' | 'voice';
+  inputMode: 'text' | 'voice' | 'camera';
   analysis: string | null;
   wordCount: number;
   createdAt: string;

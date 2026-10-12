@@ -41,3 +41,23 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Backend dependencies
+server/node_modules/
+
+# Build outputs
+.next/
+build/
+coverage/
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/

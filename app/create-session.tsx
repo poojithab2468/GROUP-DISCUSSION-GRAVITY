@@ -26,7 +26,7 @@ export default function CreateSessionScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<SessionCategory>('current_affairs');
-  const [selectedTopic, setSelectedTopic] = useState('');
+  const [selectedTopic, setSelectedTopic] = useState(GD_TOPICS.current_affairs[0] || '');
   const [customTopic, setCustomTopic] = useState('');
 
   const canSave = title.trim().length > 0;
@@ -34,7 +34,7 @@ export default function CreateSessionScreen() {
   const handleSave = useCallback(() => {
     if (!canSave) return;
 
-    const topic = customTopic.trim() || selectedTopic;
+    const topic = customTopic.trim() || selectedTopic || title.trim();
 
     const newSession: PracticeSession = {
       id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
