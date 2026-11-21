@@ -1,5 +1,6 @@
 import { HandGestureTracker, HandLandmark, GestureMetrics } from '@/utils/GestureDetection';
 import { detectMicroExpressions } from '@/utils/MicroExpressionDetector';
+import { EMASmoother } from '@/utils/FluencyAnalysis';
 import { AlertCircle, Camera, RefreshCw, ShieldAlert, Video, VideoOff } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -78,6 +79,11 @@ export default function CameraEngine({ onMetricsUpdate, onCameraStatusChange }: 
     const gestureHistoryRef = useRef<{ isVisible: boolean; status: 'Good' | 'Low' | 'Excessive' | 'Not Visible' | 'Unable to Detect'; motionRatio: number }[]>([]);
     const previousFrameDataRef = useRef<{ data: Uint8ClampedArray; time: number } | null>(null);
     const previousGestureFrameRef = useRef<{ data: Uint8ClampedArray; time: number } | null>(null);
+
+    // EMA smoothers for real-time metric stabilisation (alpha=0.25 → smooth ~4-frame lag)
+    const engagementSmootherRef = useRef(new EMASmoother(0.25));
+    const stabilitySmootherRef  = useRef(new EMASmoother(0.20));
+    const gestureScoreSmootherRef = useRef(new EMASmoother(0.30));
 
     // Dedicated Hand Gesture Tracker & Neural Hand Model
     const handTrackerRef = useRef<HandGestureTracker>(new HandGestureTracker());
@@ -524,7 +530,7 @@ export default function CameraEngine({ onMetricsUpdate, onCameraStatusChange }: 
                 gestureScoreVal = 0;
             }
 
-            // Emit live verified metrics
+            // Emit live verified metrics — smoothed via EMA to reduce frame noise
             onMetricsUpdateRef.current({
                 isCameraActive: true,
                 isFaceDetected,
@@ -534,11 +540,17 @@ export default function CameraEngine({ onMetricsUpdate, onCameraStatusChange }: 
                 eyeContact: isDirectEyeContact,
                 eyeContactStatus,
                 posture: postureResult,
-                engagementScore: isFaceDetected ? engagement : 0,
+                engagementScore: isFaceDetected
+                    ? engagementSmootherRef.current.update(engagement)
+                    : 0,
                 handVisible: handIsVisible,
                 gestureStatus: gestures,
-                gestureScore: gestureScoreVal,
-                stabilityScore: isFaceDetected ? stability : 0,
+                gestureScore: handIsVisible
+                    ? gestureScoreSmootherRef.current.update(gestureScoreVal)
+                    : 0,
+                stabilityScore: isFaceDetected
+                    ? stabilitySmootherRef.current.update(stability)
+                    : 0,
                 stressLevel: stress,
                 nervousnessScore: nervousness,
             });
@@ -554,6 +566,10 @@ export default function CameraEngine({ onMetricsUpdate, onCameraStatusChange }: 
     useEffect(() => {
         if (cameraState === 'active') {
             console.log('[CameraEngine] Camera active, starting frame analysis loop');
+            // Reset EMA smoothers so a fresh camera session starts with no residual history
+            engagementSmootherRef.current.reset();
+            stabilitySmootherRef.current.reset();
+            gestureScoreSmootherRef.current.reset();
             processingTimerRef.current = setTimeout(processFrame, 400);
         }
 

@@ -3,7 +3,7 @@ import { useSessions } from '@/context/SessionContext';
 import { useSettings } from '@/context/SettingsContext';
 import * as Haptics from 'expo-haptics';
 import { Stack, router } from 'expo-router';
-import { Bell, Brain, ChevronRight, CircleHelp, Info, Moon, Shield, Smartphone, Trash2 } from 'lucide-react-native';
+import { Bell, Brain, ChevronLeft, ChevronRight, CircleHelp, Info, Moon, Shield, Smartphone, Trash2 } from 'lucide-react-native';
 import React from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 
@@ -30,11 +30,16 @@ export default function SettingsScreen() {
         }
     };
 
-    const SettingRow = ({ icon: Icon, title, value, onValueChange, type = 'toggle', onPress }: any) => (
-        <TouchableOpacity style={styles.settingRow} onPress={onPress} disabled={type === 'toggle'} activeOpacity={0.7}>
+    const SettingRow = ({ icon: Icon, title, value, onValueChange, type = 'toggle', onPress, iconBg, iconColor }: any) => (
+        <TouchableOpacity
+            style={styles.settingRow}
+            onPress={onPress}
+            disabled={type === 'toggle'}
+            activeOpacity={0.7}
+        >
             <View style={styles.settingLeft}>
-                <View style={[styles.iconBox, { backgroundColor: Colors.light.tintLight }]}>
-                    <Icon size={20} color={Colors.light.tint} />
+                <View style={[styles.iconBox, { backgroundColor: iconBg || 'rgba(79,70,229,0.10)' }]}>
+                    <Icon size={18} color={iconColor || '#4F46E5'} />
                 </View>
                 <Text style={styles.settingTitle}>{title}</Text>
             </View>
@@ -42,14 +47,16 @@ export default function SettingsScreen() {
                 <Switch
                     value={value}
                     onValueChange={onValueChange}
-                    trackColor={{ false: '#CBD5E0', true: Colors.light.tint }}
+                    trackColor={{ false: '#CBD5E0', true: '#4F46E5' }}
                     thumbColor={Platform.OS === 'ios' ? '#FFF' : value ? '#FFF' : '#F4F3F4'}
                 />
             ) : (
-                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                     {value !== undefined && <Text style={{ color: Colors.light.textSecondary, marginRight: 8, fontSize: 14 }}>{value}</Text>}
-                     <ChevronRight size={20} color={Colors.light.textSecondary} />
-                 </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    {value !== undefined && (
+                        <Text style={styles.settingValue}>{value}</Text>
+                    )}
+                    <ChevronRight size={18} color="#94A3B8" />
+                </View>
             )}
         </TouchableOpacity>
     );
@@ -57,66 +64,274 @@ export default function SettingsScreen() {
     if (!isLoaded) return null;
 
     return (
-        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-            <Stack.Screen options={{
-                headerShown: true,
-                title: 'Settings',
-                headerTitleStyle: { fontWeight: '700' },
-            }} />
+        <ScrollView
+            style={styles.container}
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+        >
+            <Stack.Screen options={{ headerShown: false }} />
 
+            {/* Custom Header */}
+            <View style={styles.header}>
+                <TouchableOpacity
+                    style={styles.backBtn}
+                    onPress={() => router.back()}
+                    activeOpacity={0.7}
+                >
+                    <ChevronLeft size={22} color="#4F46E5" />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>Settings</Text>
+                <View style={{ width: 40 }} />
+            </View>
+
+            {/* App Preferences Section */}
             <View style={styles.section}>
                 <Text style={styles.sectionLabel}>App Preferences</Text>
                 <View style={styles.sectionCard}>
-                    <SettingRow icon={Moon} title="Theme" value="Light" onValueChange={() => {
-                        Alert.alert("Theme", "Fluent Edge is optimized with a clean light theme for professional GD preparation.");
-                    }} />
+                    <SettingRow
+                        icon={Moon}
+                        title="Theme"
+                        value="Light"
+                        type="link"
+                        iconBg="#EDE9FE"
+                        iconColor="#7C3AED"
+                        onPress={() => {
+                            Alert.alert("Theme", "Fluent Edge is optimized with a clean light theme for professional GD preparation.");
+                        }}
+                    />
                     <View style={styles.separator} />
-                    <SettingRow icon={Bell} title="Push Notifications" value={pushEnabled ? "On" : "Off"} type="link" onPress={() => router.push('/modals/notifications')} />
+                    <SettingRow
+                        icon={Bell}
+                        title="Push Notifications"
+                        value={pushEnabled ? "On" : "Off"}
+                        type="link"
+                        iconBg="#FEF3C7"
+                        iconColor="#D97706"
+                        onPress={() => router.push('/modals/notifications')}
+                    />
                     <View style={styles.separator} />
-                    <SettingRow icon={Smartphone} title="Haptic Feedback" value={hapticEnabled} onValueChange={setHapticEnabled} />
+                    <SettingRow
+                        icon={Smartphone}
+                        title="Haptic Feedback"
+                        value={hapticEnabled}
+                        onValueChange={setHapticEnabled}
+                        iconBg="#DCFCE7"
+                        iconColor="#059669"
+                    />
                 </View>
             </View>
 
-
+            {/* Support & Info Section */}
             <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Support & Info</Text>
+                <Text style={styles.sectionLabel}>Support &amp; Info</Text>
                 <View style={styles.sectionCard}>
-                    <SettingRow icon={CircleHelp} title="Help Center" type="link" onPress={() => router.push('/modals/help-center')} />
+                    <SettingRow
+                        icon={CircleHelp}
+                        title="Help Center"
+                        type="link"
+                        iconBg="#E0F2FE"
+                        iconColor="#0284C7"
+                        onPress={() => router.push('/modals/help-center')}
+                    />
                     <View style={styles.separator} />
-                    <SettingRow icon={Info} title="About Fluent Edge" type="link" onPress={() => router.push('/modals/about')} />
+                    <SettingRow
+                        icon={Info}
+                        title="About Fluent Edge"
+                        type="link"
+                        iconBg="#F3E8FF"
+                        iconColor="#8B5CF6"
+                        onPress={() => router.push('/modals/about')}
+                    />
+                    <View style={styles.separator} />
+                    <SettingRow
+                        icon={Shield}
+                        title="Privacy Policy"
+                        type="link"
+                        iconBg="rgba(79,70,229,0.10)"
+                        iconColor="#4F46E5"
+                        onPress={() => router.push('/modals/about')}
+                    />
                 </View>
             </View>
 
-            <TouchableOpacity
-                style={styles.dangerZone}
-                onPress={handleClearHistory}
-            >
-                <View style={styles.dangerIconBox}>
-                    <Trash2 size={20} color="#D32F2F" />
-                </View>
-                <Text style={styles.dangerText}>Clear All Practice History</Text>
-            </TouchableOpacity>
+            {/* Danger Zone */}
+            <View style={styles.section}>
+                <Text style={[styles.sectionLabel, { color: '#DC2626' }]}>Danger Zone</Text>
+                <TouchableOpacity
+                    style={styles.dangerZone}
+                    onPress={handleClearHistory}
+                    activeOpacity={0.8}
+                >
+                    <View style={styles.dangerContent}>
+                        <View style={styles.dangerIconBox}>
+                            <Trash2 size={20} color="#DC2626" />
+                        </View>
+                        <View style={styles.dangerTextCol}>
+                            <Text style={styles.dangerText}>Clear All Practice History</Text>
+                            <Text style={styles.dangerSubtext}>Permanently delete all GD sessions and reports</Text>
+                        </View>
+                    </View>
+                    <ChevronRight size={18} color="#DC2626" />
+                </TouchableOpacity>
+            </View>
 
-            <Text style={styles.versionText}>Version 1.0.4 (Build 42)</Text>
+            {/* Version */}
+            <Text style={styles.versionText}>Fluent Edge · Version 1.0.4 (Build 42)</Text>
             <View style={styles.bottomSpacer} />
         </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: Colors.light.background },
-    content: { padding: 20 },
-    section: { marginBottom: 24 },
-    sectionLabel: { fontSize: 13, fontWeight: '600', color: Colors.light.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, marginLeft: 4 },
-    sectionCard: { backgroundColor: Colors.light.surface, borderRadius: 20, borderWidth: 1, borderColor: Colors.light.borderLight, overflow: 'hidden' },
-    settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
-    settingLeft: { flexDirection: 'row', alignItems: 'center' },
-    iconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-    settingTitle: { fontSize: 16, fontWeight: '600', color: Colors.light.text },
-    separator: { height: 1, backgroundColor: Colors.light.borderLight, marginLeft: 64 },
-    dangerZone: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFEBEB', padding: 16, borderRadius: 20, marginTop: 10 },
-    dangerIconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#FFDADA', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-    dangerText: { fontSize: 16, fontWeight: '600', color: '#D32F2F' },
-    versionText: { textAlign: 'center', color: Colors.light.textSecondary, fontSize: 12, marginTop: 20 },
-    bottomSpacer: { height: 40 }
+    container: { flex: 1, backgroundColor: '#F5F7FF' },
+    content: { paddingBottom: 24 },
+
+    /* Custom Header */
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingTop: Platform.OS === 'ios' ? 56 : 24,
+        paddingBottom: 16,
+        backgroundColor: '#F5F7FF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#E0E7FF',
+        marginBottom: 8,
+    },
+    backBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: 'rgba(79,70,229,0.08)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E0E7FF',
+    },
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: '800',
+        color: '#0F172A',
+        letterSpacing: -0.3,
+    },
+
+    /* Sections */
+    section: {
+        marginBottom: 8,
+        paddingHorizontal: 16,
+        marginTop: 16,
+    },
+    sectionLabel: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: '#4F46E5',
+        textTransform: 'uppercase',
+        letterSpacing: 1.2,
+        marginBottom: 10,
+        marginLeft: 4,
+    },
+    sectionCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#E0E7FF',
+        overflow: 'hidden',
+        shadowColor: 'rgba(79,70,229,0.08)',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1,
+        shadowRadius: 8,
+        elevation: 2,
+    },
+
+    /* Setting Row */
+    settingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+    },
+    settingLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    iconBox: {
+        width: 38,
+        height: 38,
+        borderRadius: 11,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 14,
+    },
+    settingTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#0F172A',
+    },
+    settingValue: {
+        fontSize: 14,
+        color: '#475569',
+        marginRight: 6,
+        fontWeight: '500',
+    },
+    separator: {
+        height: 1,
+        backgroundColor: '#F1F5FF',
+        marginLeft: 68,
+    },
+
+    /* Danger Zone */
+    dangerZone: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#FFF5F5',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#FECACA',
+        shadowColor: 'rgba(220,38,38,0.08)',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1,
+        shadowRadius: 6,
+        elevation: 2,
+    },
+    dangerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    dangerIconBox: {
+        width: 38,
+        height: 38,
+        borderRadius: 11,
+        backgroundColor: '#FEE2E2',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 14,
+    },
+    dangerTextCol: { flex: 1 },
+    dangerText: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#DC2626',
+    },
+    dangerSubtext: {
+        fontSize: 12,
+        color: '#EF4444',
+        marginTop: 2,
+        fontWeight: '400',
+    },
+
+    versionText: {
+        textAlign: 'center',
+        color: '#94A3B8',
+        fontSize: 12,
+        marginTop: 28,
+        fontWeight: '500',
+    },
+    bottomSpacer: { height: 40 },
 });

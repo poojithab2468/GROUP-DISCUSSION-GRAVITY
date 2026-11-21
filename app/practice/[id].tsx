@@ -3,10 +3,21 @@ import SpeakingIndicator from '@/components/SpeakingIndicator';
 import Colors from '@/constants/colors';
 import { useSessions } from '@/context/SessionContext';
 import { CATEGORY_CONFIG, InputMode, PracticeEntry, SessionCategory } from '@/types/session';
-import { AI_PARTICIPANTS, getNextAISpeaker } from '@/utils/AIParticipantManager';
+import {
+  AI_PARTICIPANTS,
+  getNextAISpeaker,
+  inferDiscussionPhase,
+  recordUserSpoke,
+  resetTurnTracking,
+  shouldFireChainedAITurn,
+  canAISpeak,
+  fsmAIStarted,
+  fsmAIFinished,
+} from '@/utils/AIParticipantManager';
 import { generateAIResponse } from '@/utils/AIResponseGenerator';
 import { generateComprehensiveReport } from '@/utils/AIReportGenerator';
-import { calculateProfessionalismScore } from '@/utils/ProfessionalismScore';
+import { calculateProfessionalismScore, resetProfessionalismSmoothers } from '@/utils/ProfessionalismScore';
+import { VoiceActivityDetector, PitchVariationAnalyser, WPMTracker, computeFluencyScore } from '@/utils/FluencyAnalysis';
 import { tts } from '@/utils/TextToSpeech';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
@@ -52,6 +63,49 @@ import {
 
 const STT_URL = 'https://toolkit.rork.com/stt/transcribe/';
 
+// Design tokens
+const DS = {
+  primary: '#4F46E5',
+  primaryLight: 'rgba(79,70,229,0.10)',
+  primaryLighter: 'rgba(79,70,229,0.06)',
+  primaryBorder: 'rgba(79,70,229,0.18)',
+  bg: '#F5F7FF',
+  surface: '#FFFFFF',
+  surfaceElevated: '#F8FAFC',
+  text: '#0F172A',
+  textSecondary: '#475569',
+  textTertiary: '#94A3B8',
+  border: '#E0E7FF',
+  cardShadow: 'rgba(79,70,229,0.08)',
+  voiceActive: '#DC2626',
+  voiceLight: 'rgba(220,38,38,0.08)',
+  success: '#059669',
+  warning: '#F59E0B',
+  danger: '#DC2626',
+  accent: '#06B6D4',
+};
+
+// Per-participant colors
+const PARTICIPANT_COLORS: Record<string, string> = {
+  Aarav: '#4F46E5',
+  Ananya: '#059669',
+  Vikram: '#EF4444',
+  Maya: '#8B5CF6',
+};
+
+function getParticipantColor(name: string) {
+  return PARTICIPANT_COLORS[name] || DS.primary;
+}
+
+function getParticipantRole(name: string) {
+  if (name === 'Aarav') return 'Analytical';
+  if (name === 'Vikram') return 'Challenger';
+  if (name === 'Ananya') return 'Supportive';
+  if (name === 'Maya') return 'Creative';
+  return 'AI Peer';
+}
+
+// ─── EntryCard ───────────────────────────────────────────────────────────────
 function EntryCard({
   entry,
   sessionId,
@@ -80,67 +134,67 @@ function EntryCard({
     }
   }, [sessionId, entry.id, onDelete]);
 
-    const isAI = (entry as any).isAI;
-    const aiColor = (entry as any).avatarColor || Colors.light.tint;
-    const participantName = (entry as any).participantName || 'AI Peer';
+  const isAI = (entry as any).isAI;
+  const aiColor = (entry as any).avatarColor || getParticipantColor((entry as any).participantName || 'AI');
+  const participantName = (entry as any).participantName || 'AI Peer';
+  const roleLabel = getParticipantRole(participantName);
 
-    return (
-      <View style={[
-        styles.entryCard,
-        isAI
-          ? { borderLeftWidth: 4, borderLeftColor: aiColor, backgroundColor: '#FFFFFF' }
-          : { borderLeftWidth: 4, borderLeftColor: Colors.light.tint, backgroundColor: '#F8FAFC' }
-      ]}>
-        <View style={styles.entryHeader}>
-          <View style={styles.entryTimeRow}>
-            {isAI ? (
-              <View style={styles.speakerBadgeRow}>
-                <View style={[styles.speakerAvatarCircle, { backgroundColor: aiColor }]}>
-                  <Text style={styles.speakerAvatarInitials}>{participantName.charAt(0)}</Text>
-                </View>
-                <View>
-                  <Text style={[styles.speakerNameText, { color: aiColor }]}>
-                    {participantName}
-                  </Text>
-                  <Text style={styles.speakerRoleSubtext}>
-                    {participantName === 'Aarav' ? 'Analytical' :
-                     participantName === 'Vikram' ? 'Challenger' :
-                     participantName === 'Ananya' ? 'Supportive' :
-                     participantName === 'Maya' ? 'Creative' : 'AI Peer'}
-                  </Text>
+  return (
+    <View style={[
+      styles.entryCard,
+      isAI
+        ? { borderLeftColor: aiColor }
+        : { borderLeftColor: DS.primary }
+    ]}>
+      {/* Entry header row */}
+      <View style={styles.entryHeader}>
+        <View style={styles.entryTimeRow}>
+          {isAI ? (
+            <View style={styles.speakerBadgeRow}>
+              <View style={[styles.speakerAvatarCircle, { backgroundColor: aiColor }]}>
+                <Text style={styles.speakerAvatarInitials}>{participantName.charAt(0)}</Text>
+              </View>
+              <View>
+                <Text style={[styles.speakerNameText, { color: aiColor }]}>
+                  {participantName}
+                </Text>
+                <View style={[styles.rolePill, { backgroundColor: aiColor + '18' }]}>
+                  <Text style={[styles.rolePillText, { color: aiColor }]}>{roleLabel}</Text>
                 </View>
               </View>
-            ) : (
-              <View style={styles.speakerBadgeRow}>
-                <View style={[styles.speakerAvatarCircle, { backgroundColor: Colors.light.tint }]}>
-                  <Text style={styles.speakerAvatarInitials}>You</Text>
-                </View>
-                <View>
-                  <Text style={[styles.speakerNameText, { color: Colors.light.tint }]}>
-                    You (Candidate)
-                  </Text>
-                  <View style={[
-                    styles.inputModeBadge,
-                    entry.inputMode === 'voice' ? styles.voiceBadge : styles.textBadge,
+            </View>
+          ) : (
+            <View style={styles.speakerBadgeRow}>
+              <View style={[styles.speakerAvatarCircle, { backgroundColor: DS.primary }]}>
+                <Text style={styles.speakerAvatarInitials}>Y</Text>
+              </View>
+              <View>
+                <Text style={[styles.speakerNameText, { color: DS.primary }]}>
+                  You (Candidate)
+                </Text>
+                <View style={[
+                  styles.inputModeBadge,
+                  entry.inputMode === 'voice' ? styles.voiceBadge : styles.textBadge,
+                ]}>
+                  {entry.inputMode === 'voice' ? (
+                    <Mic size={10} color={DS.voiceActive} />
+                  ) : (
+                    <Type size={10} color={DS.primary} />
+                  )}
+                  <Text style={[
+                    styles.inputModeText,
+                    entry.inputMode === 'voice' ? styles.voiceBadgeText : styles.textBadgeText,
                   ]}>
-                    {entry.inputMode === 'voice' ? (
-                      <Mic size={10} color={Colors.light.voiceActive} />
-                    ) : (
-                      <Type size={10} color={Colors.light.tint} />
-                    )}
-                    <Text style={[
-                      styles.inputModeText,
-                      entry.inputMode === 'voice' ? styles.voiceBadgeText : styles.textBadgeText,
-                    ]}>
-                      {entry.inputMode === 'voice' ? 'Spoken' : 'Typed'}
-                    </Text>
-                  </View>
+                    {entry.inputMode === 'voice' ? 'Spoken' : 'Typed'}
+                  </Text>
                 </View>
               </View>
-            )}
+            </View>
+          )}
 
+          <View style={styles.entryMetaRow}>
             <View style={styles.entryTimeBadge}>
-              <Clock size={11} color={Colors.light.textTertiary} />
+              <Clock size={11} color={DS.textTertiary} />
               <Text style={styles.entryTime}>
                 {new Date(entry.createdAt).toLocaleTimeString([], {
                   hour: '2-digit',
@@ -148,16 +202,17 @@ function EntryCard({
                 })}
               </Text>
             </View>
-            <Text style={styles.entryWordCount}>{entry.wordCount} words</Text>
+            <Text style={styles.entryWordCount}>{entry.wordCount}w</Text>
           </View>
-          <TouchableOpacity
-            style={styles.entryDeleteBtn}
-            onPress={handleDelete}
-            activeOpacity={0.7}
-          >
-            <Trash2 size={13} color={Colors.light.danger} />
-          </TouchableOpacity>
         </View>
+        <TouchableOpacity
+          style={styles.entryDeleteBtn}
+          onPress={handleDelete}
+          activeOpacity={0.7}
+        >
+          <Trash2 size={13} color={DS.danger} />
+        </TouchableOpacity>
+      </View>
 
       <Text style={styles.entryText} numberOfLines={expanded ? undefined : 4}>
         {entry.text}
@@ -169,14 +224,14 @@ function EntryCard({
           onPress={() => setExpanded(!expanded)}
           activeOpacity={0.7}
         >
-          <Sparkles size={13} color={Colors.light.tint} />
+          <Sparkles size={13} color={DS.primary} />
           <Text style={styles.analysisToggleText}>
             {expanded ? 'Hide Details' : (entry.analysis ? 'View AI Feedback' : 'View Non-Verbal Stats')}
           </Text>
           {expanded ? (
-            <ChevronUp size={14} color={Colors.light.tint} />
+            <ChevronUp size={14} color={DS.primary} />
           ) : (
-            <ChevronDown size={14} color={Colors.light.tint} />
+            <ChevronDown size={14} color={DS.primary} />
           )}
         </TouchableOpacity>
       )}
@@ -233,6 +288,7 @@ function EntryCard({
   );
 }
 
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function PracticeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getSession, addEntry, updateEntryAnalysis, deleteEntry, saveFinalReport } = useSessions();
@@ -254,7 +310,11 @@ export default function PracticeScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [sessionTimer, setSessionTimer] = useState(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const recordPulseAnim = useRef(new Animated.Value(1)).current;
+  const sessionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Speech Recognition and Session timing refs
   const isRecordingIntentRef = useRef(false);
@@ -314,12 +374,31 @@ export default function PracticeScreen() {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Fluency analysis — wired to mic stream during voice recording sessions
+  const vadRef = useRef<VoiceActivityDetector>(new VoiceActivityDetector());
+  const pitchRef = useRef<PitchVariationAnalyser>(new PitchVariationAnalyser());
+  const wpmTrackerRef = useRef<WPMTracker>(new WPMTracker());
+  // Accumulated fluency data across all voice turns in this session
+  const sessionSilenceIntervalsRef = useRef<number[]>([]);
+  const sessionPitchResultRef = useRef<{ variationIndex: number; label: string }>({ variationIndex: 0, label: 'Monotone' });
+  const sessionFillerCountRef = useRef<number>(0);
+
+  // Fade in + session timer + pulse animations
   useEffect(() => {
+    // Reset AI turn tracking for this new session
+    resetTurnTracking();
+    // Reset per-session EMA smoothers (professionalism non-verbal scoring)
+    resetProfessionalismSmoothers();
+
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 500,
       useNativeDriver: true,
     }).start();
+
+    sessionTimerRef.current = setInterval(() => {
+      setSessionTimer(prev => prev + 1);
+    }, 1000);
 
     return () => {
       tts.stop();
@@ -327,8 +406,43 @@ export default function PracticeScreen() {
         try { recognitionRef.current.stop(); } catch (_) {}
       }
       if (timerRef.current) clearInterval(timerRef.current);
+      if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
     };
   }, []);
+
+  // Pulsing animation for speaking indicator
+  useEffect(() => {
+    if (isAISpeaking) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.08, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [isAISpeaking]);
+
+  // Pulsing animation for record button
+  useEffect(() => {
+    if (isRecording) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(recordPulseAnim, { toValue: 1.12, duration: 500, useNativeDriver: true }),
+          Animated.timing(recordPulseAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      recordPulseAnim.setValue(1);
+    }
+  }, [isRecording]);
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const handleMetricsUpdate = useCallback((metrics: BehavioralMetrics) => {
     setLiveMetrics(metrics);
@@ -359,30 +473,46 @@ export default function PracticeScreen() {
     }));
   }, []);
 
-  // AI Response Generator & Speech
+  // AI Response Generator & Speech — strict FSM-enforced turn order
+  // Rule: ONE AI speaks → candidate responds → ONE different AI speaks.
+  // No AI-to-AI chaining. FSM state guards against duplicate triggers.
   const triggerAIResponse = useCallback(async (customEntries?: PracticeEntry[]) => {
-    if (!session || isAISpeaking || practiceMode !== 'ai') return;
+    if (!session || practiceMode !== 'ai') return;
 
+    // FSM gate: only proceed if the FSM is in PROCESSING_CANDIDATE state
+    if (!canAISpeak()) {
+      console.log('[FSM] AI trigger blocked — not in PROCESSING_CANDIDATE state.');
+      return;
+    }
+
+    // Acquire the AI_RESPONDING lock
+    fsmAIStarted();
     setIsAISpeaking(true);
+
     try {
-      const speaker = getNextAISpeaker(lastAISpeakerId);
+      // Build full chronological transcript (oldest first) for context
+      const entriesToUse = customEntries || session.entries;
+      const chronologicalEntries = [...entriesToUse].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+
+      const transcript = chronologicalEntries.map(e => ({
+        text: e.text,
+        sender: (e as any).isAI
+          ? ((e as any).participantName || 'AI Peer')
+          : 'Candidate',
+        createdAt: e.createdAt,
+      }));
+
+      // Intelligent speaker selection — considers phase, sentiment, question detection
+      const speaker = getNextAISpeaker({ transcript });
       setLastAISpeakerId(speaker.id);
       setCurrentSpeakerName(speaker.name);
-
-      const entriesToUse = customEntries || session.entries;
-      // Ensure strictly chronological ordering (oldest first, latest last)
-      const chronologicalEntries = [...entriesToUse].sort((a, b) =>
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-      );
 
       const aiResponse = await generateAIResponse(speaker, {
         topic: session.topic || 'General Discussion',
         category: session.category || 'General',
-        transcript: chronologicalEntries.map(e => ({
-          text: e.text,
-          sender: (e as any).isAI ? ((e as any).participantName || 'AI Peer') : 'Candidate',
-          createdAt: e.createdAt,
-        }))
+        transcript,
       });
 
       const newEntry: PracticeEntry = {
@@ -396,7 +526,7 @@ export default function PracticeScreen() {
           isAI: true,
           participantName: speaker.name,
           avatarColor: speaker.avatarColor,
-        } as any)
+        } as any),
       };
 
       addEntry(session.id, newEntry);
@@ -404,16 +534,21 @@ export default function PracticeScreen() {
       if (!isTtsMuted) {
         await tts.speak(aiResponse, {
           pitch: speaker.voiceConfig.pitch,
-          rate: speaker.voiceConfig.rate
+          rate: speaker.voiceConfig.rate,
         });
       }
+
+      // NO AI-to-AI chaining — the FSM now waits for the candidate.
+      // shouldFireChainedAITurn() always returns false (enforced by FSM).
     } catch (error) {
       console.error('[PracticeScreen] AI Response error:', error);
     } finally {
+      // Release the AI_RESPONDING lock → transition to WAITING_FOR_CANDIDATE
+      fsmAIFinished();
       setIsAISpeaking(false);
       setCurrentSpeakerName('Candidate');
     }
-  }, [session, isAISpeaking, practiceMode, lastAISpeakerId, isTtsMuted, addEntry]);
+  }, [session, practiceMode, lastAISpeakerId, isTtsMuted, addEntry]);
 
   // Voice Recording: Start
   const startRecording = async () => {
@@ -604,6 +739,19 @@ export default function PracticeScreen() {
   const stopRecording = async () => {
     isRecordingIntentRef.current = false;
 
+    // Stop fluency analysis and collect turn-level results
+    vadRef.current.stop();
+    pitchRef.current.stop();
+    const turnSilence = vadRef.current.getSilenceIntervals();
+    const turnPitch = pitchRef.current.getResult();
+    if (turnSilence.length > 0) {
+      sessionSilenceIntervalsRef.current.push(...turnSilence);
+      vadRef.current.reset(); // clear so next turn starts fresh
+    }
+    if (turnPitch.variationIndex > 0) {
+      sessionPitchResultRef.current = { variationIndex: turnPitch.variationIndex, label: turnPitch.label };
+    }
+
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -775,9 +923,12 @@ export default function PracticeScreen() {
       finalizedSegmentsRef.current = [];
       interimTranscriptRef.current = '';
 
-      // Trigger AI Response with updated entries so the AI understands user's actual speech!
-      if (practiceMode === 'ai' && !isAISpeaking) {
-        const updatedEntries = [newEntry, ...session.entries];
+      // Trigger AI Response — FSM-enforced: recordUserSpoke transitions
+      // the FSM from WAITING_FOR_CANDIDATE → PROCESSING_CANDIDATE, which
+      // is the ONLY state in which canAISpeak() returns true.
+      if (practiceMode === 'ai') {
+        recordUserSpoke();   // FSM transition: unlock exactly ONE AI turn
+        const updatedEntries = [...session.entries, newEntry];
         setTimeout(() => triggerAIResponse(updatedEntries), 800);
       }
     } catch (error) {
@@ -820,6 +971,10 @@ export default function PracticeScreen() {
           ? Math.round(sessStats.stabilityScores.reduce((a, b) => a + b, 0) / sessStats.stabilityScores.length)
           : undefined,
         dominantStress: sessStats.maxStress,
+        // Fluency data collected from VoiceActivityDetector and PitchVariationAnalyser
+        silenceIntervalsMs: sessionSilenceIntervalsRef.current,
+        pitchVariationIndex: sessionPitchResultRef.current.variationIndex,
+        pitchLabel: sessionPitchResultRef.current.label,
       } : undefined;
 
       const result = await generateComprehensiveReport(session, durationSeconds, liveCameraStats);
@@ -936,7 +1091,8 @@ export default function PracticeScreen() {
     );
   }
 
-  const config = CATEGORY_CONFIG[session.category as SessionCategory] || { label: session.category || 'General', emoji: '💬', color: Colors.light.tint };
+  const config = CATEGORY_CONFIG[session.category as SessionCategory] || { label: session.category || 'General', emoji: '💬', color: DS.primary };
+  const wordCount = inputText.split(/\s+/).filter(Boolean).length;
 
   return (
     <KeyboardAvoidingView
@@ -944,13 +1100,14 @@ export default function PracticeScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
+      {/* ── Custom Header ── */}
       <Stack.Screen
         options={{
           headerTransparent: true,
           headerTitle: '',
           headerLeft: () => (
             <TouchableOpacity onPress={() => router.back()} style={styles.headerBack}>
-              <ChevronLeft size={22} color={Colors.light.text} />
+              <ChevronLeft size={22} color={DS.text} />
             </TouchableOpacity>
           ),
           headerRight: () => (
@@ -962,88 +1119,164 @@ export default function PracticeScreen() {
               style={styles.headerAudioBtn}
               accessibilityLabel={isTtsMuted ? "Unmute AI Voice" : "Mute AI Voice"}
             >
-              {isTtsMuted ? <VolumeX size={18} color={Colors.light.danger} /> : <Volume2 size={18} color={Colors.light.tint} />}
+              {isTtsMuted ? <VolumeX size={18} color={DS.danger} /> : <Volume2 size={18} color={DS.primary} />}
             </TouchableOpacity>
           )
         }}
       />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <SpeakingIndicator
-          isSpeaking={isAISpeaking || isRecording}
-          speakerName={isRecording ? 'You' : currentSpeakerName}
-          isUser={isRecording}
-        />
+        <Animated.View style={{ opacity: fadeAnim }}>
 
-        {/* Top Header Card */}
-        <View style={styles.topSection}>
-          <View style={[styles.categoryBadge, { backgroundColor: config.color + '18' }]}>
-            <Text style={styles.badgeEmoji}>{config.emoji}</Text>
-            <Text style={[styles.categoryLabel, { color: config.color }]}>{config.label}</Text>
+          {/* ── Session Info Header Card ── */}
+          <View style={styles.sessionHeaderCard}>
+            <View style={styles.sessionHeaderTop}>
+              <View style={[styles.categoryBadge, { backgroundColor: config.color + '18' }]}>
+                <Text style={styles.badgeEmoji}>{config.emoji}</Text>
+                <Text style={[styles.categoryLabel, { color: config.color }]}>{config.label}</Text>
+              </View>
+              <View style={styles.timerBadge}>
+                <Clock size={13} color={DS.primary} />
+                <Text style={styles.timerText}>{formatTime(sessionTimer)}</Text>
+              </View>
+            </View>
+            <Text style={styles.sessionTitle} numberOfLines={2}>{session.title}</Text>
+            {session.topic && (
+              <View style={styles.topicBanner}>
+                <FileText size={12} color={DS.primary} />
+                <Text style={styles.topicBannerText} numberOfLines={2}>{session.topic}</Text>
+              </View>
+            )}
+            {/* End Session button */}
+            <TouchableOpacity
+              style={[styles.endSessionBtn, isFinalAnalyzing && { opacity: 0.5 }]}
+              onPress={handleFinalSubmit}
+              disabled={isFinalAnalyzing}
+            >
+              {isFinalAnalyzing ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Sparkles size={15} color="#FFFFFF" />
+              )}
+              <Text style={styles.endSessionBtnText}>
+                {isFinalAnalyzing ? 'Generating Report...' : 'End Session & Get Report'}
+              </Text>
+            </TouchableOpacity>
           </View>
-          <Text style={styles.sessionTitle}>{session.title}</Text>
-          {session.topic && (
-            <View style={styles.topicBanner}>
-              <Text style={styles.topicBannerLabel}>Topic</Text>
-              <Text style={styles.topicBannerText}>{session.topic}</Text>
+
+          {/* ── SpeakingIndicator ── */}
+          <SpeakingIndicator
+            isSpeaking={isAISpeaking || isRecording}
+            speakerName={isRecording ? 'You' : currentSpeakerName}
+            isUser={isRecording}
+          />
+
+          {/* ── AI Participants Panel ── */}
+          {practiceMode === 'ai' && (
+            <View style={styles.participantsSection}>
+              <View style={styles.participantsHeaderRow}>
+                <Text style={styles.sectionLabel}>AI Discussion Members</Text>
+                {isAISpeaking && (
+                  <View style={styles.aiThinkingBadge}>
+                    <ActivityIndicator size="small" color={DS.primary} />
+                    <Text style={styles.aiThinkingText}>{currentSpeakerName} is speaking...</Text>
+                  </View>
+                )}
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.participantsList}>
+                {AI_PARTICIPANTS.map(p => {
+                  const isCurrent = currentSpeakerName === p.name && isAISpeaking;
+                  const pColor = getParticipantColor(p.name);
+                  return (
+                    <Animated.View
+                      key={p.id}
+                      style={[
+                        styles.participantCard,
+                        isCurrent && {
+                          borderColor: pColor,
+                          backgroundColor: pColor + '10',
+                          transform: [{ scale: pulseAnim }],
+                        }
+                      ]}
+                    >
+                      <View style={[
+                        styles.participantAvatar,
+                        {
+                          backgroundColor: pColor,
+                          borderWidth: isCurrent ? 3 : 0,
+                          borderColor: isCurrent ? pColor + '60' : 'transparent',
+                        }
+                      ]}>
+                        <Text style={styles.avatarText}>{p.name[0]}</Text>
+                      </View>
+                      <Text style={[styles.participantName, isCurrent && { color: pColor }]} numberOfLines={1}>{p.name}</Text>
+                      <View style={[styles.rolePillSmall, { backgroundColor: pColor + '18' }]}>
+                        <Text style={[styles.rolePillSmallText, { color: pColor }]}>{getParticipantRole(p.name)}</Text>
+                      </View>
+                      {isCurrent && (
+                        <View style={[styles.speakingLabel, { backgroundColor: pColor }]}>
+                          <Text style={styles.speakingLabelText}>Speaking</Text>
+                        </View>
+                      )}
+                    </Animated.View>
+                  );
+                })}
+              </ScrollView>
             </View>
           )}
-        </View>
 
-        {/* Practice Input & Camera Section */}
-        <View style={styles.inputSection}>
-          <View style={styles.inputHeader}>
-            {/* Mode selection row */}
-            <View style={[styles.inputModeRow, { marginBottom: 12 }]}>
-              <TouchableOpacity
-                style={[styles.modeTab, practiceMode === 'ai' && styles.modeTabActive]}
-                onPress={() => setPracticeMode('ai')}
-              >
-                <Sparkles size={14} color={practiceMode === 'ai' ? Colors.light.tint : Colors.light.textTertiary} />
-                <Text style={[styles.modeTabText, practiceMode === 'ai' && styles.modeTabTextActive]}>AI Simulated GD</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modeTab, practiceMode === 'individual' && styles.modeTabActive]}
-                onPress={() => setPracticeMode('individual')}
-              >
-                <UserCheck size={14} color={practiceMode === 'individual' ? Colors.light.tint : Colors.light.textTertiary} />
-                <Text style={[styles.modeTabText, practiceMode === 'individual' && styles.modeTabTextActive]}>Solo Practice</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Input tabs row */}
-            <View style={styles.inputModeRow}>
-              <TouchableOpacity
-                style={[styles.modeTab, inputMode === 'text' && styles.modeTabActive]}
-                onPress={() => setInputMode('text')}
-              >
-                <Type size={14} color={inputMode === 'text' ? Colors.light.tint : Colors.light.textTertiary} />
-                <Text style={[styles.modeTabText, inputMode === 'text' && styles.modeTabTextActive]}>Text</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modeTab, inputMode === 'voice' && styles.modeTabActive]}
-                onPress={() => setInputMode('voice')}
-              >
-                <Mic size={14} color={inputMode === 'voice' ? Colors.light.voiceActive : Colors.light.textTertiary} />
-                <Text style={[styles.modeTabText, inputMode === 'voice' && styles.modeTabVoiceActive]}>Voice</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modeTab, isCameraActive && styles.modeTabActive]}
-                onPress={() => setIsCameraActive(!isCameraActive)}
-              >
-                {isCameraActive ? (
-                  <Video size={14} color={Colors.light.tint} />
-                ) : (
-                  <VideoOff size={14} color={Colors.light.textTertiary} />
-                )}
-                <Text style={[styles.modeTabText, isCameraActive && styles.modeTabTextActive]}>
-                  {isCameraActive ? 'Camera On' : 'Camera Off'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+          {/* ── Practice Mode Toggle ── */}
+          <View style={styles.modeToggleRow}>
+            <TouchableOpacity
+              style={[styles.modeTab, practiceMode === 'ai' && styles.modeTabActive]}
+              onPress={() => setPracticeMode('ai')}
+            >
+              <Sparkles size={14} color={practiceMode === 'ai' ? DS.primary : DS.textTertiary} />
+              <Text style={[styles.modeTabText, practiceMode === 'ai' && styles.modeTabTextActive]}>AI Simulated GD</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeTab, practiceMode === 'individual' && styles.modeTabActive]}
+              onPress={() => setPracticeMode('individual')}
+            >
+              <UserCheck size={14} color={practiceMode === 'individual' ? DS.primary : DS.textTertiary} />
+              <Text style={[styles.modeTabText, practiceMode === 'individual' && styles.modeTabTextActive]}>Solo Practice</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Live Camera & Behavioral Metrics Panel */}
+          {/* ── Camera & Analytics Panel ── */}
+          <View style={styles.cameraControlRow}>
+            <TouchableOpacity
+              style={[styles.cameraToggleBtn, isCameraActive && styles.cameraToggleBtnActive]}
+              onPress={() => setIsCameraActive(!isCameraActive)}
+            >
+              {isCameraActive ? (
+                <Video size={15} color={DS.primary} />
+              ) : (
+                <VideoOff size={15} color={DS.textTertiary} />
+              )}
+              <Text style={[styles.cameraToggleBtnText, isCameraActive && { color: DS.primary }]}>
+                {isCameraActive ? 'Camera On' : 'Camera Off'}
+              </Text>
+            </TouchableOpacity>
+            {isCameraActive && (
+              <View style={styles.engagementMiniBar}>
+                <Text style={styles.engagementMiniLabel}>Attention</Text>
+                <View style={styles.engagementMiniTrack}>
+                  <View style={[
+                    styles.engagementMiniFill,
+                    {
+                      width: `${liveMetrics.isCameraActive && liveMetrics.isFaceDetected ? liveMetrics.engagementScore : 0}%`,
+                      backgroundColor: liveMetrics.engagementScore > 65 ? DS.success : DS.warning,
+                    }
+                  ]} />
+                </View>
+                <Text style={styles.engagementMiniPct}>
+                  {liveMetrics.isCameraActive && liveMetrics.isFaceDetected ? `${liveMetrics.engagementScore}%` : '--'}
+                </Text>
+              </View>
+            )}
+          </View>
+
           {isCameraActive && (
             <View style={styles.cameraRow}>
               {/* Camera Preview */}
@@ -1054,7 +1287,7 @@ export default function PracticeScreen() {
               {/* Real-time Behavioral Analytics */}
               <View style={styles.analyticsPanel}>
                 <View style={styles.metricItem}>
-                  <Activity size={16} color={liveMetrics.isFaceDetected ? Colors.light.success : Colors.light.textTertiary} />
+                  <Activity size={15} color={liveMetrics.isFaceDetected ? DS.success : DS.textTertiary} />
                   <Text style={styles.metricLabel}>
                     Emotion:{' '}
                     <Text style={styles.metricValue}>
@@ -1066,10 +1299,10 @@ export default function PracticeScreen() {
                 </View>
 
                 <View style={styles.metricItem}>
-                  <Eye size={16} color={liveMetrics.eyeContact ? Colors.light.tint : Colors.light.danger} />
+                  <Eye size={15} color={liveMetrics.eyeContact ? DS.primary : DS.danger} />
                   <Text style={styles.metricLabel}>
                     Eye Contact:{' '}
-                    <Text style={[styles.metricValue, { color: liveMetrics.eyeContact ? Colors.light.tint : Colors.light.textSecondary }]}>
+                    <Text style={[styles.metricValue, { color: liveMetrics.eyeContact ? DS.primary : DS.textSecondary }]}>
                       {liveMetrics.isCameraActive
                         ? (liveMetrics.isFaceDetected
                             ? (liveMetrics.eyeContact ? 'Direct (Screen)' : 'Looking Away')
@@ -1080,7 +1313,7 @@ export default function PracticeScreen() {
                 </View>
 
                 <View style={styles.metricItem}>
-                  <UserCheck size={16} color={liveMetrics.posture === 'Straight' ? Colors.light.success : Colors.light.warning} />
+                  <UserCheck size={15} color={liveMetrics.posture === 'Straight' ? DS.success : DS.warning} />
                   <Text style={styles.metricLabel}>
                     Posture:{' '}
                     <Text style={styles.metricValue}>
@@ -1093,15 +1326,15 @@ export default function PracticeScreen() {
 
                 <View style={styles.metricItem}>
                   <Hand
-                    size={16}
+                    size={15}
                     color={
                       liveMetrics.isCameraActive && liveMetrics.handVisible
                         ? (liveMetrics.gestureStatus === 'Good'
-                            ? Colors.light.success
+                            ? DS.success
                             : liveMetrics.gestureStatus === 'Excessive'
-                              ? Colors.light.danger
-                              : Colors.light.tint)
-                        : Colors.light.textTertiary
+                              ? DS.danger
+                              : DS.primary)
+                        : DS.textTertiary
                     }
                   />
                   <Text style={styles.metricLabel}>
@@ -1112,11 +1345,11 @@ export default function PracticeScreen() {
                         {
                           color: liveMetrics.isCameraActive && liveMetrics.handVisible
                             ? (liveMetrics.gestureStatus === 'Good'
-                                ? Colors.light.success
+                                ? DS.success
                                 : liveMetrics.gestureStatus === 'Excessive'
-                                  ? Colors.light.danger
-                                  : Colors.light.tint)
-                            : Colors.light.textSecondary
+                                  ? DS.danger
+                                  : DS.primary)
+                            : DS.textSecondary
                         }
                       ]}
                     >
@@ -1149,7 +1382,7 @@ export default function PracticeScreen() {
                         styles.attentionFill,
                         {
                           width: `${liveMetrics.isCameraActive && liveMetrics.isFaceDetected ? liveMetrics.engagementScore : 0}%`,
-                          backgroundColor: liveMetrics.engagementScore > 65 ? Colors.light.tint : Colors.light.accentWarm
+                          backgroundColor: liveMetrics.engagementScore > 65 ? DS.primary : DS.warning
                         }
                       ]}
                     />
@@ -1159,29 +1392,65 @@ export default function PracticeScreen() {
             </View>
           )}
 
-          {/* Argument Input */}
-          <View style={styles.inputContainer}>
+          {/* ── Input Section ── */}
+          <View style={styles.inputSection}>
+            {/* Input mode toggle: Text | Voice */}
+            <View style={styles.inputModeToggleRow}>
+              <TouchableOpacity
+                style={[styles.inputModeTab, inputMode === 'text' && styles.inputModeTabActive]}
+                onPress={() => setInputMode('text')}
+              >
+                <Type size={14} color={inputMode === 'text' ? DS.primary : DS.textTertiary} />
+                <Text style={[styles.inputModeTabText, inputMode === 'text' && styles.inputModeTabTextActive]}>Text</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.inputModeTab, inputMode === 'voice' && styles.inputModeTabVoiceActive]}
+                onPress={() => setInputMode('voice')}
+              >
+                <Mic size={14} color={inputMode === 'voice' ? DS.voiceActive : DS.textTertiary} />
+                <Text style={[styles.inputModeTabText, inputMode === 'voice' && styles.inputModeTabVoiceText]}>Voice</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Text mode */}
             {inputMode === 'text' ? (
-              <TextInput
-                style={styles.inputBox}
-                placeholder="Type your arguments, counter-points, or opening statement..."
-                placeholderTextColor={Colors.light.textTertiary}
-                multiline
-                value={inputText}
-                onChangeText={setInputText}
-                editable={!isAISpeaking}
-              />
+              <View>
+                <TextInput
+                  style={styles.inputBox}
+                  placeholder="Type your arguments, counter-points, or opening statement..."
+                  placeholderTextColor={DS.textTertiary}
+                  multiline
+                  value={inputText}
+                  onChangeText={setInputText}
+                  editable={!isAISpeaking}
+                />
+                <View style={styles.inputFooterRow}>
+                  <Text style={styles.wordCountText}>{wordCount} {wordCount === 1 ? 'word' : 'words'}</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.sendBtn,
+                      (!inputText.trim() || isAISpeaking) && styles.sendBtnDisabled,
+                    ]}
+                    onPress={handleSubmit}
+                    disabled={!inputText.trim() || isAISpeaking}
+                  >
+                    <Send size={16} color="#FFFFFF" />
+                    <Text style={styles.sendBtnText}>Submit</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             ) : (
+              /* Voice mode */
               <View style={styles.voiceSection}>
-                {/* Speech Error Banner if any */}
+                {/* Speech error banner */}
                 {speechError && (
                   <View style={styles.speechErrorBox}>
-                    <AlertCircle size={14} color={Colors.light.danger} />
+                    <AlertCircle size={14} color={DS.danger} />
                     <Text style={styles.speechErrorText}>{speechError}</Text>
                   </View>
                 )}
 
-                {/* Microphone Status Header */}
+                {/* Mic status */}
                 <View style={styles.micStatusRow}>
                   <View style={[
                     styles.micStatusIndicator,
@@ -1202,7 +1471,7 @@ export default function PracticeScreen() {
                   )}
                 </View>
 
-                {/* Live Speech Preview */}
+                {/* Live speech preview */}
                 <View style={[styles.transcriptionPreview, isRecording && styles.transcriptionPreviewRecording]}>
                   <Text style={[styles.transcriptionText, !inputText && !interimTranscript && styles.transcriptionPlaceholder]}>
                     {inputText
@@ -1211,77 +1480,100 @@ export default function PracticeScreen() {
                   </Text>
                 </View>
 
-                {/* Prominent Circular Microphone Button */}
-                <TouchableOpacity
-                  style={[
-                    styles.recordButton,
-                    isRecording && styles.recordButtonActive,
-                    isAISpeaking && styles.recordButtonDisabled
-                  ]}
-                  onPress={isRecording ? stopRecording : startRecording}
-                  activeOpacity={0.8}
-                  disabled={isAISpeaking}
-                  accessibilityLabel={isRecording ? "Stop recording speech" : "Start recording speech"}
-                >
-                  {isTranscribing ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
-                  ) : (
-                    <Mic size={32} color={isRecording ? "#FFFFFF" : Colors.light.tint} />
-                  )}
-                </TouchableOpacity>
+                {/* Large circular record button */}
+                <Animated.View style={{ transform: [{ scale: recordPulseAnim }] }}>
+                  <TouchableOpacity
+                    style={[
+                      styles.recordButton,
+                      isRecording && styles.recordButtonActive,
+                      isAISpeaking && styles.recordButtonDisabled
+                    ]}
+                    onPress={isRecording ? stopRecording : startRecording}
+                    activeOpacity={0.8}
+                    disabled={isAISpeaking}
+                    accessibilityLabel={isRecording ? "Stop recording speech" : "Start recording speech"}
+                  >
+                    {isTranscribing ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Mic size={32} color={isRecording ? "#FFFFFF" : DS.primary} />
+                    )}
+                  </TouchableOpacity>
+                </Animated.View>
 
-                <Text style={[styles.recordInstruction, isRecording && { color: Colors.light.voiceActive, fontWeight: '700' }]}>
+                <Text style={[styles.recordInstruction, isRecording && { color: DS.voiceActive, fontWeight: '700' }]}>
                   {isTranscribing
                     ? 'Processing audio transcription...'
                     : isRecording
                       ? `Listening (Pauses handled smoothly) — Click to stop`
                       : 'Click to speak your argument'}
                 </Text>
+
+                {/* Word count + submit for voice */}
+                {(inputText || interimTranscript) && (
+                  <View style={styles.voiceSubmitRow}>
+                    <Text style={styles.wordCountText}>
+                      {inputText.split(/\s+/).filter(Boolean).length} words captured
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.sendBtn, isAISpeaking && styles.sendBtnDisabled]}
+                      onPress={handleSubmit}
+                      disabled={isAISpeaking}
+                    >
+                      <Send size={15} color="#FFFFFF" />
+                      <Text style={styles.sendBtnText}>{isRecording ? 'Stop & Submit' : 'Submit'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* AI responding indicator */}
+            {isAISpeaking && (
+              <View style={styles.aiRespondingBanner}>
+                <ActivityIndicator size="small" color={DS.primary} />
+                <Text style={styles.aiRespondingText}>AI is responding...</Text>
               </View>
             )}
           </View>
 
-          {/* Submit Argument Button */}
-          <TouchableOpacity
-            style={[
-              styles.submitButton,
-              (!inputText.trim() && !interimTranscript.trim() && !isRecording) && styles.submitButtonDisabled,
-              isAISpeaking && styles.submitButtonDisabled
-            ]}
-            onPress={handleSubmit}
-            disabled={(!inputText.trim() && !interimTranscript.trim() && !isRecording) || isAISpeaking}
-          >
-            <Send size={16} color="#FFFFFF" />
-            <Text style={styles.submitButtonText}>
-              {isRecording ? 'Finish & Submit Argument' : 'Submit Argument'}
-            </Text>
-          </TouchableOpacity>
+          {/* ── Discussion Transcript ── */}
+          <View style={styles.entriesList}>
+            <View style={styles.transcriptHeader}>
+              <Text style={styles.sectionLabel}>Discussion Transcript</Text>
+              <View style={styles.transcriptCountBadge}>
+                <Text style={styles.transcriptCountText}>{session.entries.length} turns</Text>
+              </View>
+            </View>
 
-          {/* End Session Button */}
-          <TouchableOpacity
-            style={[
-              styles.finalSubmitButton,
-              isFinalAnalyzing && styles.submitButtonDisabled
-            ]}
-            onPress={handleFinalSubmit}
-            disabled={isFinalAnalyzing}
-          >
-            {isFinalAnalyzing ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
+            {session.entries.length === 0 ? (
+              <View style={styles.emptyEntriesBox}>
+                <Sparkles size={28} color={DS.primary} style={{ marginBottom: 10, opacity: 0.5 }} />
+                <Text style={styles.emptyEntriesText}>No discussion entries yet.</Text>
+                <Text style={styles.emptyEntriesSubtext}>Speak or type your opening argument above to begin the simulated GD.</Text>
+              </View>
             ) : (
-              <Sparkles size={16} color="#FFFFFF" />
+              session.entries.map(entry => (
+                <EntryCard key={entry.id} entry={entry} sessionId={session.id} onDelete={deleteEntry} />
+              ))
             )}
-            <Text style={styles.submitButtonText}>
-              {isFinalAnalyzing ? 'Generating Full GD Report...' : 'Finish Session & Get Full GD Report'}
-            </Text>
-          </TouchableOpacity>
 
-          {/* Comprehensive GD Report */}
+            {/* Pulsing speaking bar when AI is speaking */}
+            {isAISpeaking && (
+              <Animated.View style={[styles.speakingBarContainer, { transform: [{ scaleX: pulseAnim }] }]}>
+                <View style={styles.speakingBar} />
+              </Animated.View>
+            )}
+          </View>
+
+          {/* ── Performance Report ── */}
           {finalAnalysis && (
             <View style={styles.finalAnalysisContainer}>
               <View style={styles.finalAnalysisHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <Sparkles size={20} color={Colors.light.tint} />
+                  <View style={styles.reportIconCircle}>
+                    <Sparkles size={18} color={DS.primary} />
+                  </View>
                   <Text style={styles.finalAnalysisTitle}>Full GD Evaluation Report</Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1292,11 +1584,11 @@ export default function PracticeScreen() {
                     accessibilityLabel="Copy GD Report"
                   >
                     {copiedReport ? (
-                      <Check size={13} color={Colors.light.success} />
+                      <Check size={13} color={DS.success} />
                     ) : (
-                      <Copy size={13} color={Colors.light.tint} />
+                      <Copy size={13} color={DS.primary} />
                     )}
-                    <Text style={[styles.reportActionText, copiedReport && { color: Colors.light.success }]}>
+                    <Text style={[styles.reportActionText, copiedReport && { color: DS.success }]}>
                       {copiedReport ? 'Copied' : 'Copy'}
                     </Text>
                   </TouchableOpacity>
@@ -1306,64 +1598,18 @@ export default function PracticeScreen() {
                     activeOpacity={0.7}
                     accessibilityLabel="Export GD Report"
                   >
-                    <Download size={13} color={Colors.light.tint} />
+                    <Download size={13} color={DS.primary} />
                     <Text style={styles.reportActionText}>Export</Text>
                   </TouchableOpacity>
                 </View>
               </View>
+              <View style={styles.reportDivider} />
               {renderCleanReport(finalAnalysis)}
             </View>
           )}
-        </View>
 
-        {/* AI Group Members Bar */}
-        {practiceMode === 'ai' && (
-          <View style={styles.participantsSection}>
-            <View style={styles.participantsHeaderRow}>
-              <Text style={styles.sectionLabel}>AI Group Discussion Members</Text>
-              <Text style={styles.participantsHint}>
-                {isAISpeaking ? `${currentSpeakerName} is speaking...` : 'They will respond after your argument'}
-              </Text>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.participantsList}>
-              {AI_PARTICIPANTS.map(p => {
-                const isCurrent = currentSpeakerName === p.name && isAISpeaking;
-                return (
-                  <View key={p.id} style={[styles.participantItem, isCurrent && styles.participantItemActive]}>
-                    <View style={[
-                      styles.participantAvatar,
-                      {
-                        borderColor: isCurrent ? p.avatarColor : Colors.light.border,
-                        backgroundColor: p.avatarColor + '18'
-                      }
-                    ]}>
-                      <Text style={[styles.avatarText, { color: p.avatarColor }]}>{p.name[0]}</Text>
-                    </View>
-                    <Text style={styles.participantName} numberOfLines={1}>{p.name}</Text>
-                    <Text style={styles.participantRole}>{p.personality}</Text>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Discussion Transcript */}
-        <View style={styles.entriesList}>
-          <Text style={styles.sectionLabel}>Discussion Transcript ({session.entries.length} turns)</Text>
-          {session.entries.length === 0 ? (
-            <View style={styles.emptyEntriesBox}>
-              <Text style={styles.emptyEntriesText}>No discussion entries yet.</Text>
-              <Text style={styles.emptyEntriesSubtext}>Speak or type your opening argument above to begin the simulated GD.</Text>
-            </View>
-          ) : (
-            session.entries.map(entry => (
-              <EntryCard key={entry.id} entry={entry} sessionId={session.id} onDelete={deleteEntry} />
-            ))
-          )}
-        </View>
-
-        <View style={styles.bottomSpacer} />
+          <View style={styles.bottomSpacer} />
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -1372,124 +1618,256 @@ export default function PracticeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.light.background,
+    backgroundColor: DS.bg,
   },
   scrollContent: {
-    paddingTop: 90,
-    paddingHorizontal: 20,
-    paddingBottom: 40,
+    paddingTop: 100,
+    paddingHorizontal: 18,
+    paddingBottom: 48,
   },
+
+  // ── Header ──
   headerBack: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: Colors.light.surface,
+    backgroundColor: DS.surface,
     borderWidth: 1,
-    borderColor: Colors.light.border,
+    borderColor: DS.border,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 16,
     marginTop: 8,
-    shadowColor: Colors.light.cardShadow,
+    shadowColor: DS.cardShadow,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
     elevation: 2,
   },
   headerAudioBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: Colors.light.surface,
+    backgroundColor: DS.surface,
     borderWidth: 1,
-    borderColor: Colors.light.border,
+    borderColor: DS.border,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
     marginTop: 8,
-    shadowColor: Colors.light.cardShadow,
+    shadowColor: DS.cardShadow,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
     elevation: 2,
   },
-  topSection: {
-    marginBottom: 20,
+
+  // ── Session Header Card ──
+  sessionHeaderCard: {
+    backgroundColor: DS.surface,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: DS.border,
+    shadowColor: DS.cardShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  sessionHeaderTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
   },
   categoryBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 16,
-    marginBottom: 10,
+    borderRadius: 20,
   },
   badgeEmoji: {
     fontSize: 14,
-    marginRight: 6,
+    marginRight: 5,
   },
   categoryLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  sessionTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: Colors.light.text,
-    marginBottom: 8,
-  },
-  topicBanner: {
-    backgroundColor: Colors.light.surface,
-    borderRadius: 14,
-    padding: 14,
-    marginTop: 6,
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.light.tint,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    shadowColor: Colors.light.cardShadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  topicBannerLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: Colors.light.tint,
     textTransform: 'uppercase',
-    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  timerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: DS.primaryLighter,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: DS.primaryBorder,
+  },
+  timerText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: DS.primary,
+    fontVariant: ['tabular-nums'],
+  },
+  sessionTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: DS.text,
+    marginBottom: 10,
+    lineHeight: 29,
+  },
+  topicBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: DS.primaryLighter,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: DS.primaryBorder,
   },
   topicBannerText: {
-    fontSize: 15,
-    color: Colors.light.text,
+    flex: 1,
+    fontSize: 13,
+    color: DS.text,
     fontWeight: '600',
-    lineHeight: 22,
+    lineHeight: 19,
   },
-  inputSection: {
-    backgroundColor: Colors.light.surface,
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    shadowColor: Colors.light.cardShadow,
+  endSessionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: DS.danger,
+    borderRadius: 14,
+    paddingVertical: 12,
+    gap: 8,
+    shadowColor: DS.danger,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
-    elevation: 2,
+    elevation: 3,
   },
-  inputHeader: {
+  endSessionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  // ── AI Participants Panel ──
+  participantsSection: {
     marginBottom: 16,
   },
-  inputModeRow: {
+  participantsHeaderRow: {
     flexDirection: 'row',
-    backgroundColor: Colors.light.surfaceElevated,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: DS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  aiThinkingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: DS.primaryLighter,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: DS.primaryBorder,
+  },
+  aiThinkingText: {
+    fontSize: 11,
+    color: DS.primary,
+    fontWeight: '600',
+  },
+  participantsList: {
+    gap: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  participantCard: {
+    alignItems: 'center',
+    width: 82,
+    padding: 10,
+    borderRadius: 16,
+    backgroundColor: DS.surface,
+    borderWidth: 1.5,
+    borderColor: DS.border,
+    shadowColor: DS.cardShadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+    gap: 4,
+  },
+  participantAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  avatarText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  participantName: {
+    color: DS.text,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  rolePillSmall: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 2,
+  },
+  rolePillSmallText: {
+    fontSize: 9,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  speakingLabel: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  speakingLabelText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+
+  // ── Practice Mode Toggle ──
+  modeToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: DS.surfaceElevated,
     borderRadius: 12,
     padding: 3,
     gap: 4,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: DS.border,
   },
   modeTab: {
     flex: 1,
@@ -1501,30 +1879,86 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   modeTabActive: {
-    backgroundColor: Colors.light.surface,
-    shadowColor: Colors.light.cardShadow,
+    backgroundColor: DS.surface,
+    shadowColor: DS.cardShadow,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.08,
     shadowRadius: 3,
     elevation: 2,
   },
   modeTabText: {
     fontSize: 12,
     fontWeight: '600',
-    color: Colors.light.textSecondary,
+    color: DS.textSecondary,
   },
   modeTabTextActive: {
-    color: Colors.light.text,
+    color: DS.text,
     fontWeight: '700',
   },
-  modeTabVoiceActive: {
-    color: Colors.light.voiceActive,
-    fontWeight: '700',
+
+  // ── Camera Control Row ──
+  cameraControlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
   },
+  cameraToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: DS.surfaceElevated,
+    borderWidth: 1,
+    borderColor: DS.border,
+  },
+  cameraToggleBtnActive: {
+    backgroundColor: DS.primaryLighter,
+    borderColor: DS.primaryBorder,
+  },
+  cameraToggleBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: DS.textSecondary,
+  },
+  engagementMiniBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  engagementMiniLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: DS.textSecondary,
+    width: 56,
+  },
+  engagementMiniTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: DS.border,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  engagementMiniFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  engagementMiniPct: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: DS.primary,
+    width: 32,
+    textAlign: 'right',
+  },
+
+  // ── Camera Row ──
   cameraRow: {
     flexDirection: 'row',
-    gap: 14,
-    marginBottom: 18,
+    gap: 12,
+    marginBottom: 16,
     alignItems: 'stretch',
   },
   cameraFrame: {
@@ -1532,33 +1966,36 @@ const styles = StyleSheet.create({
     height: 190,
     borderRadius: 16,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: DS.border,
   },
   analyticsPanel: {
     flex: 1,
-    backgroundColor: Colors.light.surfaceElevated,
+    backgroundColor: DS.surfaceElevated,
     borderRadius: 16,
-    padding: 14,
+    padding: 12,
     justifyContent: 'center',
-    gap: 10,
+    gap: 9,
     borderWidth: 1,
-    borderColor: Colors.light.border,
+    borderColor: DS.border,
   },
   metricItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 7,
   },
   metricLabel: {
-    color: Colors.light.textSecondary,
-    fontSize: 12,
+    color: DS.textSecondary,
+    fontSize: 11.5,
     fontWeight: '500',
+    flex: 1,
   },
   metricValue: {
-    color: Colors.light.text,
+    color: DS.text,
     fontWeight: '700',
   },
   attentionContainer: {
-    marginTop: 4,
+    marginTop: 2,
   },
   attentionHeader: {
     flexDirection: 'row',
@@ -1567,19 +2004,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   attentionLabel: {
-    color: Colors.light.textTertiary,
+    color: DS.textTertiary,
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   attentionPercent: {
-    color: Colors.light.tint,
+    color: DS.primary,
     fontSize: 11,
     fontWeight: '800',
   },
   attentionTrack: {
     height: 6,
-    backgroundColor: Colors.light.border,
+    backgroundColor: DS.border,
     borderRadius: 3,
     width: '100%',
     overflow: 'hidden',
@@ -1588,23 +2026,155 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 3,
   },
-  inputContainer: {
+
+  // ── Input Section ──
+  inputSection: {
+    backgroundColor: DS.surface,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: DS.border,
+    shadowColor: DS.cardShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  inputModeToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: DS.surfaceElevated,
+    borderRadius: 12,
+    padding: 3,
+    gap: 4,
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: DS.border,
+  },
+  inputModeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    borderRadius: 10,
+    gap: 6,
+  },
+  inputModeTabActive: {
+    backgroundColor: DS.surface,
+    shadowColor: DS.cardShadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  inputModeTabVoiceActive: {
+    backgroundColor: DS.voiceLight,
+    shadowColor: DS.voiceActive,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  inputModeTabText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: DS.textSecondary,
+  },
+  inputModeTabTextActive: {
+    color: DS.text,
+    fontWeight: '700',
+  },
+  inputModeTabVoiceText: {
+    color: DS.voiceActive,
+    fontWeight: '700',
   },
   inputBox: {
     minHeight: 100,
-    backgroundColor: Colors.light.surfaceElevated,
+    backgroundColor: DS.surfaceElevated,
     borderRadius: 14,
     padding: 14,
-    color: Colors.light.text,
+    color: DS.text,
     fontSize: 15,
     textAlignVertical: 'top',
     borderWidth: 1,
-    borderColor: Colors.light.border,
+    borderColor: DS.border,
+    lineHeight: 22,
   },
+  inputFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  wordCountText: {
+    fontSize: 12,
+    color: DS.textTertiary,
+    fontWeight: '500',
+  },
+  sendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: DS.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+    shadowColor: DS.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  sendBtnDisabled: {
+    opacity: 0.4,
+  },
+  sendBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  aiRespondingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: DS.primaryLighter,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: DS.primaryBorder,
+  },
+  aiRespondingText: {
+    color: DS.primary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Voice mode
   voiceSection: {
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 8,
+  },
+  speechErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    width: '100%',
+  },
+  speechErrorText: {
+    color: DS.danger,
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
   },
   micStatusRow: {
     flexDirection: 'row',
@@ -1612,14 +2182,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     marginBottom: 10,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
   micStatusIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
     borderWidth: 1,
     gap: 6,
   },
@@ -1643,306 +2213,203 @@ const styles = StyleSheet.create({
   micStatusText: {
     fontSize: 12,
     fontWeight: '600',
-    color: Colors.light.text,
+    color: DS.text,
   },
   recordingTimerText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#EF4444',
-  },
-  speechErrorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    gap: 6,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-    width: '100%',
-  },
-  speechErrorText: {
-    color: Colors.light.danger,
-    fontSize: 12,
-    fontWeight: '600',
-    flex: 1,
+    fontSize: 13,
+    fontWeight: '800',
+    color: DS.voiceActive,
   },
   transcriptionPreview: {
-    backgroundColor: Colors.light.surfaceElevated,
+    backgroundColor: DS.surfaceElevated,
     borderRadius: 14,
     padding: 14,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: Colors.light.border,
+    borderColor: DS.border,
     minHeight: 70,
     width: '100%',
     justifyContent: 'center',
   },
   transcriptionPreviewRecording: {
-    borderColor: Colors.light.voiceActive,
+    borderColor: DS.voiceActive,
     backgroundColor: '#FEF2F2',
   },
   transcriptionText: {
-    color: Colors.light.text,
+    color: DS.text,
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
   },
   transcriptionPlaceholder: {
-    color: Colors.light.textTertiary,
+    color: DS.textTertiary,
     fontStyle: 'italic',
   },
   recordButton: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: Colors.light.tintLight,
-    borderWidth: 2,
-    borderColor: Colors.light.tint,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: DS.primaryLighter,
+    borderWidth: 2.5,
+    borderColor: DS.primary,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 10,
-    shadowColor: Colors.light.tint,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowColor: DS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 4,
   },
   recordButtonActive: {
-    backgroundColor: Colors.light.voiceActive,
+    backgroundColor: DS.voiceActive,
     borderColor: '#B91C1C',
-    transform: [{ scale: 1.05 }],
+    shadowColor: DS.voiceActive,
+    shadowOpacity: 0.3,
   },
   recordButtonDisabled: {
     opacity: 0.4,
   },
   recordInstruction: {
-    color: Colors.light.textSecondary,
+    color: DS.textSecondary,
     fontSize: 12,
     textAlign: 'center',
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.light.tint,
-    borderRadius: 14,
-    paddingVertical: 14,
-    marginTop: 8,
-    gap: 8,
-    shadowColor: Colors.light.tint,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  submitButtonDisabled: {
-    opacity: 0.4,
-  },
-  submitButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  finalSubmitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.light.accent,
-    borderRadius: 14,
-    paddingVertical: 14,
-    marginTop: 10,
-    gap: 8,
-    shadowColor: Colors.light.accent,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  finalAnalysisContainer: {
-    marginTop: 20,
-    backgroundColor: Colors.light.surfaceElevated,
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  finalAnalysisHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.light.border,
-  },
-  finalAnalysisTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.light.text,
-  },
-  reportActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: Colors.light.surface,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  reportActionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.light.text,
-  },
-  participantsSection: {
-    marginBottom: 24,
-  },
-  participantsHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.light.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  participantsHint: {
-    fontSize: 11,
-    color: Colors.light.tint,
-    fontWeight: '600',
-  },
-  participantsList: {
-    gap: 12,
-    paddingVertical: 4,
-  },
-  participantItem: {
-    alignItems: 'center',
-    width: 76,
-    padding: 8,
-    borderRadius: 12,
-    backgroundColor: Colors.light.surface,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-  },
-  participantItemActive: {
-    borderColor: Colors.light.tint,
-    backgroundColor: Colors.light.tintLight,
-  },
-  participantAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
     marginBottom: 6,
   },
-  avatarText: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  voiceSubmitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 10,
   },
-  participantName: {
-    color: Colors.light.text,
+
+  // ── Transcript Section ──
+  transcriptHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  transcriptCountBadge: {
+    backgroundColor: DS.primaryLighter,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: DS.primaryBorder,
+  },
+  transcriptCountText: {
     fontSize: 11,
     fontWeight: '700',
-    textAlign: 'center',
-  },
-  participantRole: {
-    color: Colors.light.textTertiary,
-    fontSize: 9,
-    textAlign: 'center',
+    color: DS.primary,
   },
   entriesList: {
-    gap: 14,
+    gap: 12,
+    marginBottom: 20,
   },
   emptyEntriesBox: {
-    backgroundColor: Colors.light.surface,
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: DS.surface,
+    borderRadius: 18,
+    padding: 28,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.light.border,
-    marginTop: 8,
+    borderColor: DS.border,
+    marginTop: 4,
   },
   emptyEntriesText: {
     fontSize: 15,
     fontWeight: '700',
-    color: Colors.light.text,
-    marginBottom: 4,
+    color: DS.text,
+    marginBottom: 6,
   },
   emptyEntriesSubtext: {
     fontSize: 13,
-    color: Colors.light.textSecondary,
+    color: DS.textSecondary,
     textAlign: 'center',
+    lineHeight: 19,
   },
+  speakingBarContainer: {
+    marginTop: 6,
+    overflow: 'hidden',
+    borderRadius: 4,
+  },
+  speakingBar: {
+    height: 4,
+    backgroundColor: DS.primary,
+    borderRadius: 4,
+    opacity: 0.6,
+  },
+
+  // ── EntryCard ──
   entryCard: {
-    backgroundColor: Colors.light.surface,
+    backgroundColor: DS.surface,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: Colors.light.border,
-    shadowColor: Colors.light.cardShadow,
+    borderColor: DS.border,
+    borderLeftWidth: 4,
+    shadowColor: DS.cardShadow,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
     elevation: 1,
   },
   entryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 10,
   },
   entryTimeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
     flexWrap: 'wrap',
   },
   speakerBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginRight: 6,
+    gap: 9,
   },
   speakerAvatarCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
   speakerAvatarInitials: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
   },
   speakerNameText: {
     fontSize: 13,
     fontWeight: '800',
+    marginBottom: 2,
   },
   speakerRoleSubtext: {
     fontSize: 10,
-    color: Colors.light.textTertiary,
+    color: DS.textTertiary,
     fontWeight: '600',
   },
-  aiBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+  rolePill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
   },
-  aiBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
+  rolePillText: {
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  entryMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 'auto',
   },
   entryTimeBadge: {
     flexDirection: 'row',
@@ -1951,48 +2418,50 @@ const styles = StyleSheet.create({
   },
   entryTime: {
     fontSize: 11,
-    color: Colors.light.textTertiary,
+    color: DS.textTertiary,
   },
   inputModeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 6,
+    borderRadius: 8,
     gap: 4,
+    alignSelf: 'flex-start',
   },
   voiceBadge: {
-    backgroundColor: Colors.light.voiceLight,
+    backgroundColor: DS.voiceLight,
   },
   textBadge: {
-    backgroundColor: Colors.light.tintLight,
+    backgroundColor: DS.primaryLighter,
   },
   inputModeText: {
     fontSize: 10,
     fontWeight: '700',
   },
   voiceBadgeText: {
-    color: Colors.light.voiceActive,
+    color: DS.voiceActive,
   },
   textBadgeText: {
-    color: Colors.light.tint,
+    color: DS.primary,
   },
   entryWordCount: {
     fontSize: 11,
-    color: Colors.light.textTertiary,
+    color: DS.textTertiary,
   },
   entryDeleteBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FEE2E2',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#FEF2F2',
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 8,
   },
   entryText: {
     fontSize: 15,
-    color: Colors.light.text,
-    lineHeight: 22,
+    color: DS.text,
+    lineHeight: 23,
     marginBottom: 10,
   },
   analysisToggle: {
@@ -2000,80 +2469,145 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: DS.primaryLighter,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: DS.primaryBorder,
     marginTop: 4,
   },
   analysisToggleText: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.light.tint,
+    color: DS.primary,
   },
   analysisBox: {
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: Colors.light.border,
+    borderTopColor: DS.border,
   },
   pulseSection: {
     marginBottom: 10,
   },
   pulseTitle: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
-    color: Colors.light.textSecondary,
+    color: DS.textSecondary,
     textTransform: 'uppercase',
-    marginBottom: 8,
+    letterSpacing: 0.5,
+    marginBottom: 10,
   },
   pulseRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 7,
     gap: 8,
   },
   pulseLabel: {
-    width: 90,
+    width: 92,
     fontSize: 11,
-    color: Colors.light.textSecondary,
+    color: DS.textSecondary,
     fontWeight: '500',
   },
   pulseBarBg: {
     flex: 1,
     height: 6,
-    backgroundColor: Colors.light.border,
+    backgroundColor: DS.border,
     borderRadius: 3,
+    overflow: 'hidden',
   },
   pulseBar: {
     height: '100%',
     borderRadius: 3,
   },
   pulseValue: {
-    width: 32,
+    width: 34,
     fontSize: 11,
-    color: Colors.light.text,
+    color: DS.text,
     fontWeight: '700',
     textAlign: 'right',
   },
   analysisText: {
     fontSize: 13,
-    color: Colors.light.textSecondary,
+    color: DS.textSecondary,
     lineHeight: 20,
+  },
+
+  // ── Report ──
+  finalAnalysisContainer: {
+    marginTop: 4,
+    backgroundColor: DS.surface,
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: DS.border,
+    shadowColor: DS.cardShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  finalAnalysisHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  reportIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: DS.primaryLighter,
+    borderWidth: 1,
+    borderColor: DS.primaryBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  finalAnalysisTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: DS.text,
+  },
+  reportDivider: {
+    height: 1,
+    backgroundColor: DS.border,
+    marginBottom: 14,
+  },
+  reportActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: DS.surfaceElevated,
+    borderWidth: 1,
+    borderColor: DS.border,
+  },
+  reportActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: DS.text,
   },
   reportHeading2: {
     fontSize: 17,
     fontWeight: '800',
-    color: Colors.light.tint,
-    marginTop: 14,
+    color: DS.primary,
+    marginTop: 16,
     marginBottom: 6,
   },
   reportHeading3: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.light.accent,
+    color: DS.accent,
     marginTop: 10,
     marginBottom: 4,
   },
   reportParagraph: {
     fontSize: 14,
-    color: Colors.light.text,
+    color: DS.text,
     lineHeight: 21,
     flex: 1,
   },
@@ -2084,23 +2618,25 @@ const styles = StyleSheet.create({
     paddingRight: 6,
   },
   reportBullet: {
-    color: Colors.light.tint,
+    color: DS.primary,
     marginRight: 8,
     fontSize: 14,
     marginTop: 1,
   },
+
+  // ── Error / Misc ──
   errorContainer: {
     flex: 1,
-    backgroundColor: Colors.light.background,
+    backgroundColor: DS.bg,
     justifyContent: 'center',
     alignItems: 'center',
   },
   errorText: {
-    color: Colors.light.text,
+    color: DS.text,
     fontSize: 16,
     fontWeight: '600',
   },
   bottomSpacer: {
-    height: 40,
+    height: 48,
   },
 });

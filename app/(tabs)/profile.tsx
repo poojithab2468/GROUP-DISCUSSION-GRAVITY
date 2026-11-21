@@ -32,9 +32,10 @@ import {
   X,
   Zap
 } from 'lucide-react-native';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Modal,
   Platform,
@@ -55,6 +56,8 @@ const AVATAR_PRESETS = [
   { id: '6', url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=240&auto=format&fit=crop&q=80', label: 'Leader' },
 ];
 
+const SKILL_COLORS = ['#0284C7', '#8B5CF6', '#10B981', '#06B6D4', '#EC4899', '#F59E0B'];
+
 export default function ProfileScreen() {
   const { sessions } = useSessions();
   const { user, updateProfile, logout } = useAuth();
@@ -69,6 +72,9 @@ export default function ProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
   const [saveErrorMsg, setSaveErrorMsg] = useState('');
+
+  // Skill bar animations
+  const skillAnims = useRef(SKILL_COLORS.map(() => new Animated.Value(0))).current;
 
   // Open modal with current user values
   const handleOpenEditModal = () => {
@@ -259,6 +265,27 @@ export default function ProfileScreen() {
     };
   }, [sessions]);
 
+  // Animate skill bars on mount
+  useEffect(() => {
+    const skillValues = [
+      stats.skillProficiency.content,
+      stats.skillProficiency.arguments,
+      stats.skillProficiency.fluency,
+      stats.skillProficiency.coherence,
+      stats.skillProficiency.vocabulary,
+      stats.skillProficiency.nonverbal,
+    ];
+    const animations = skillAnims.map((anim, i) =>
+      Animated.timing(anim, {
+        toValue: skillValues[i],
+        duration: 800 + i * 80,
+        useNativeDriver: false,
+        delay: i * 60,
+      })
+    );
+    Animated.stagger(60, animations).start();
+  }, [stats.skillProficiency]);
+
   const userName = user?.name || 'Fluent Learner';
   const userEmail = user?.email || 'learner@fluentedge.ai';
   const userBio = user?.bio || 'Placement Aspirant aiming to master corporate Group Discussions.';
@@ -266,9 +293,22 @@ export default function ProfileScreen() {
   const userCollege = user?.college || 'Engineering Graduate';
   const userAvatar = user?.avatarUrl || '';
 
+  const skillItems = [
+    { label: 'Content & Topic Relevance', value: stats.skillProficiency.content },
+    { label: 'Argument Quality & Reasoning', value: stats.skillProficiency.arguments },
+    { label: 'Verbal Fluency & Cadence', value: stats.skillProficiency.fluency },
+    { label: 'Coherence & Logical Organization', value: stats.skillProficiency.coherence },
+    { label: 'Vocabulary & Lexical Diversity', value: stats.skillProficiency.vocabulary },
+    { label: 'Non-Verbal Presence (Gaze & Posture)', value: stats.skillProficiency.nonverbal },
+  ];
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Top App Header */}
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Page Header */}
       <View style={styles.pageHeader}>
         <View>
           <Text style={styles.pageTitle}>Profile</Text>
@@ -279,15 +319,18 @@ export default function ProfileScreen() {
           onPress={handleOpenEditModal}
           activeOpacity={0.8}
         >
-          <Edit3 size={16} color={Colors.light.tint} />
-          <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+          <Edit3 size={15} color="#4F46E5" />
+          <Text style={styles.editProfileBtnText}>Edit</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Main Profile Header Card */}
+      {/* Profile Hero Card */}
       <View style={styles.profileCard}>
-        <View style={styles.profileHeaderRow}>
-          {/* Avatar Container */}
+        {/* Accent gradient strip */}
+        <View style={styles.profileCardAccent} />
+
+        <View style={styles.profileHeroRow}>
+          {/* Avatar */}
           <View style={styles.avatarWrapper}>
             {userAvatar ? (
               <Image source={{ uri: userAvatar }} style={styles.avatarImage} />
@@ -297,44 +340,44 @@ export default function ProfileScreen() {
               </View>
             )}
             <TouchableOpacity style={styles.avatarEditBadge} onPress={handleOpenEditModal}>
-              <Edit3 size={12} color="#FFFFFF" />
+              <Edit3 size={11} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
-          {/* User Details */}
-          <View style={styles.profileTextInfo}>
-            <View style={styles.nameRow}>
-              <Text style={styles.userNameText}>{userName}</Text>
-              <View style={[styles.tierTag, { backgroundColor: `${stats.rankColor}15`, borderColor: `${stats.rankColor}30` }]}>
-                <ShieldCheck size={12} color={stats.rankColor} />
-                <Text style={[styles.tierTagText, { color: stats.rankColor }]}>{stats.rankTier}</Text>
-              </View>
+          {/* Name & rank */}
+          <View style={styles.profileHeroText}>
+            <Text style={styles.userNameText}>{userName}</Text>
+            <View style={[styles.tierTag, { backgroundColor: `${stats.rankColor}15`, borderColor: `${stats.rankColor}30` }]}>
+              <ShieldCheck size={11} color={stats.rankColor} />
+              <Text style={[styles.tierTagText, { color: stats.rankColor }]}>{stats.rankTier}</Text>
             </View>
             <Text style={styles.userEmailText}>{userEmail}</Text>
-
-            <View style={styles.metaRow}>
-              <View style={styles.metaChip}>
-                <Compass size={12} color={Colors.light.tint} />
-                <Text style={styles.metaChipText}>{userRole}</Text>
-              </View>
-              <View style={styles.metaChip}>
-                <BookOpen size={12} color="#64748B" />
-                <Text style={styles.metaChipText}>{userCollege}</Text>
-              </View>
-            </View>
           </View>
         </View>
 
-        {/* Bio Card */}
-        <View style={styles.bioBox}>
-          <Text style={styles.bioText}>"{userBio}"</Text>
+        {/* Meta chips */}
+        <View style={styles.metaRow}>
+          <View style={styles.metaChip}>
+            <Compass size={11} color="#4F46E5" />
+            <Text style={styles.metaChipText}>{userRole}</Text>
+          </View>
+          <View style={styles.metaChip}>
+            <BookOpen size={11} color="#64748B" />
+            <Text style={styles.metaChipText}>{userCollege}</Text>
+          </View>
         </View>
 
-        {/* Level & XP Bar Card */}
+        {/* Bio quote box */}
+        <View style={styles.bioBox}>
+          <Text style={styles.bioQuote}>"</Text>
+          <Text style={styles.bioText}>{userBio}</Text>
+        </View>
+
+        {/* XP Level Card */}
         <View style={styles.xpCard}>
           <View style={styles.xpHeader}>
             <View style={styles.levelBadge}>
-              <Sparkles size={14} color="#F59E0B" />
+              <Sparkles size={13} color="#B45309" />
               <Text style={styles.levelBadgeText}>Level {stats.currentLevel}</Text>
             </View>
             <Text style={styles.xpScoreText}>
@@ -346,12 +389,12 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.xpFooter}>
             <Text style={styles.xpFooterText}>{stats.xpIntoLevel} / 500 XP in Level {stats.currentLevel}</Text>
-            <Text style={styles.xpFooterRemaining}>{stats.xpToNextLevel} XP to Level {stats.currentLevel + 1}</Text>
+            <Text style={styles.xpFooterRemaining}>{stats.xpToNextLevel} XP to Lv.{stats.currentLevel + 1}</Text>
           </View>
         </View>
       </View>
 
-      {/* Real Statistics Grid (4 Key Metrics) */}
+      {/* Stats Grid */}
       <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionTitle}>Performance Summary</Text>
         <Text style={styles.sectionSubtitle}>{stats.completedSessionsCount} sessions analyzed</Text>
@@ -371,7 +414,7 @@ export default function ProfileScreen() {
           <View style={[styles.statIconBox, { backgroundColor: '#DCFCE7' }]}>
             <Award size={20} color="#10B981" />
           </View>
-          <Text style={[styles.statValue, { color: stats.averageScore >= 75 ? '#10B981' : Colors.light.text }]}>
+          <Text style={[styles.statValue, { color: stats.averageScore >= 75 ? '#10B981' : '#0F172A' }]}>
             {stats.averageScore > 0 ? `${stats.averageScore}/100` : '--'}
           </Text>
           <Text style={styles.statLabel}>Average Score</Text>
@@ -399,11 +442,11 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Skill Progress & Corporate Rubric Dimensions */}
+      {/* Skill Competency Section */}
       <View style={styles.cardSection}>
         <View style={styles.cardHeader}>
           <View style={styles.cardHeaderTitleRow}>
-            <Layers size={18} color={Colors.light.tint} />
+            <Layers size={18} color="#4F46E5" />
             <Text style={styles.cardTitle}>Skill Competency Radar</Text>
           </View>
           <Text style={styles.cardHeaderBadge}>6 Placement Dimensions</Text>
@@ -413,75 +456,33 @@ export default function ProfileScreen() {
         </Text>
 
         <View style={styles.skillList}>
-          {/* 1. Content Relevance */}
-          <View style={styles.skillItem}>
-            <View style={styles.skillHeaderRow}>
-              <Text style={styles.skillName}>Content & Topic Relevance</Text>
-              <Text style={styles.skillScoreText}>{stats.skillProficiency.content}%</Text>
+          {skillItems.map((skill, i) => (
+            <View key={skill.label} style={styles.skillItem}>
+              <View style={styles.skillHeaderRow}>
+                <Text style={styles.skillName}>{skill.label}</Text>
+                <Text style={[styles.skillScoreText, { color: SKILL_COLORS[i] }]}>{skill.value}%</Text>
+              </View>
+              <View style={styles.skillBarTrack}>
+                <Animated.View
+                  style={[
+                    styles.skillBarFill,
+                    {
+                      backgroundColor: SKILL_COLORS[i],
+                      width: skillAnims[i].interpolate({
+                        inputRange: [0, 100],
+                        outputRange: ['0%', '100%'],
+                        extrapolate: 'clamp',
+                      }),
+                    },
+                  ]}
+                />
+              </View>
             </View>
-            <View style={styles.skillBarTrack}>
-              <View style={[styles.skillBarFill, { width: `${stats.skillProficiency.content}%`, backgroundColor: '#0284C7' }]} />
-            </View>
-          </View>
-
-          {/* 2. Argument Quality */}
-          <View style={styles.skillItem}>
-            <View style={styles.skillHeaderRow}>
-              <Text style={styles.skillName}>Argument Quality & Reasoning</Text>
-              <Text style={styles.skillScoreText}>{stats.skillProficiency.arguments}%</Text>
-            </View>
-            <View style={styles.skillBarTrack}>
-              <View style={[styles.skillBarFill, { width: `${stats.skillProficiency.arguments}%`, backgroundColor: '#8B5CF6' }]} />
-            </View>
-          </View>
-
-          {/* 3. Fluency & Delivery */}
-          <View style={styles.skillItem}>
-            <View style={styles.skillHeaderRow}>
-              <Text style={styles.skillName}>Verbal Fluency & Cadence</Text>
-              <Text style={styles.skillScoreText}>{stats.skillProficiency.fluency}%</Text>
-            </View>
-            <View style={styles.skillBarTrack}>
-              <View style={[styles.skillBarFill, { width: `${stats.skillProficiency.fluency}%`, backgroundColor: '#10B981' }]} />
-            </View>
-          </View>
-
-          {/* 4. Coherence & Logical Flow */}
-          <View style={styles.skillItem}>
-            <View style={styles.skillHeaderRow}>
-              <Text style={styles.skillName}>Coherence & Logical Organization</Text>
-              <Text style={styles.skillScoreText}>{stats.skillProficiency.coherence}%</Text>
-            </View>
-            <View style={styles.skillBarTrack}>
-              <View style={[styles.skillBarFill, { width: `${stats.skillProficiency.coherence}%`, backgroundColor: '#06B6D4' }]} />
-            </View>
-          </View>
-
-          {/* 5. Vocabulary & Professional Tone */}
-          <View style={styles.skillItem}>
-            <View style={styles.skillHeaderRow}>
-              <Text style={styles.skillName}>Vocabulary & Lexical Diversity</Text>
-              <Text style={styles.skillScoreText}>{stats.skillProficiency.vocabulary}%</Text>
-            </View>
-            <View style={styles.skillBarTrack}>
-              <View style={[styles.skillBarFill, { width: `${stats.skillProficiency.vocabulary}%`, backgroundColor: '#EC4899' }]} />
-            </View>
-          </View>
-
-          {/* 6. Non-Verbal Presence */}
-          <View style={styles.skillItem}>
-            <View style={styles.skillHeaderRow}>
-              <Text style={styles.skillName}>Non-Verbal Presence (Gaze & Posture)</Text>
-              <Text style={styles.skillScoreText}>{stats.skillProficiency.nonverbal}%</Text>
-            </View>
-            <View style={styles.skillBarTrack}>
-              <View style={[styles.skillBarFill, { width: `${stats.skillProficiency.nonverbal}%`, backgroundColor: '#F59E0B' }]} />
-            </View>
-          </View>
+          ))}
         </View>
       </View>
 
-      {/* Strengths & Growth Areas Overview */}
+      {/* Strengths & Growth Areas */}
       <View style={styles.strengthsGrid}>
         <View style={styles.strengthsCard}>
           <View style={styles.strengthsHeader}>
@@ -520,7 +521,7 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Achievement Badges Showcase */}
+      {/* Earned Badges Horizontal Scroll */}
       <View style={styles.cardSection}>
         <View style={styles.cardHeader}>
           <View style={styles.cardHeaderTitleRow}>
@@ -532,7 +533,7 @@ export default function ProfileScreen() {
             onPress={() => router.push('/badges' as never)}
           >
             <Text style={styles.viewAllBadgesText}>View All ({stats.unlockedBadges.size}/{BADGES_LIST.length})</Text>
-            <ChevronRight size={14} color={Colors.light.tint} />
+            <ChevronRight size={14} color="#4F46E5" />
           </TouchableOpacity>
         </View>
 
@@ -579,11 +580,11 @@ export default function ProfileScreen() {
         </ScrollView>
       </View>
 
-      {/* Recent GD Sessions & Performance Reports */}
+      {/* Recent GD Sessions */}
       <View style={styles.cardSection}>
         <View style={styles.cardHeader}>
           <View style={styles.cardHeaderTitleRow}>
-            <Calendar size={18} color={Colors.light.tint} />
+            <Calendar size={18} color="#4F46E5" />
             <Text style={styles.cardTitle}>Recent GD Sessions</Text>
           </View>
           <TouchableOpacity
@@ -591,7 +592,7 @@ export default function ProfileScreen() {
             onPress={() => router.push('/(tabs)/practice' as never)}
           >
             <Text style={styles.viewAllBadgesText}>Practice More</Text>
-            <ChevronRight size={14} color={Colors.light.tint} />
+            <ChevronRight size={14} color="#4F46E5" />
           </TouchableOpacity>
         </View>
 
@@ -650,7 +651,7 @@ export default function ProfileScreen() {
                     activeOpacity={0.8}
                   >
                     <Text style={styles.reviewReportBtnText}>{hasReport ? 'View Report' : 'Open GD'}</Text>
-                    <ArrowRight size={14} color={Colors.light.tint} />
+                    <ArrowRight size={14} color="#4F46E5" />
                   </TouchableOpacity>
                 </View>
               );
@@ -704,7 +705,7 @@ export default function ProfileScreen() {
 
       <View style={styles.bottomSpacer} />
 
-      {/* INTERACTIVE EDIT PROFILE MODAL */}
+      {/* EDIT PROFILE MODAL */}
       <Modal
         visible={isEditModalOpen}
         animationType="slide"
@@ -715,15 +716,20 @@ export default function ProfileScreen() {
           <View style={styles.modalContent}>
             {/* Modal Header */}
             <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Edit Profile</Text>
-                <Text style={styles.modalSubtitle}>Update your placement credentials and avatar</Text>
+              <View style={styles.modalHeaderLeft}>
+                <View style={styles.modalHeaderIcon}>
+                  <Edit3 size={16} color="#4F46E5" />
+                </View>
+                <View>
+                  <Text style={styles.modalTitle}>Edit Profile</Text>
+                  <Text style={styles.modalSubtitle}>Update your placement credentials and avatar</Text>
+                </View>
               </View>
               <TouchableOpacity
                 style={styles.modalCloseBtn}
                 onPress={() => setIsEditModalOpen(false)}
               >
-                <X size={20} color={Colors.light.textSecondary} />
+                <X size={20} color="#475569" />
               </TouchableOpacity>
             </View>
 
@@ -743,7 +749,7 @@ export default function ProfileScreen() {
                 </View>
               ) : null}
 
-              {/* Avatar Picker Section */}
+              {/* Avatar Picker */}
               <Text style={styles.inputSectionLabel}>Select Profile Avatar</Text>
               <View style={styles.avatarPickerRow}>
                 {AVATAR_PRESETS.map((preset) => {
@@ -768,7 +774,7 @@ export default function ProfileScreen() {
                 })}
               </View>
 
-              {/* Custom Avatar URL Field */}
+              {/* Custom Avatar URL */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Or Custom Image URL</Text>
                 <TextInput
@@ -781,7 +787,7 @@ export default function ProfileScreen() {
                 />
               </View>
 
-              {/* Full Name Field */}
+              {/* Full Name */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Full Name *</Text>
                 <TextInput
@@ -793,7 +799,7 @@ export default function ProfileScreen() {
                 />
               </View>
 
-              {/* Target Role Field */}
+              {/* Target Role */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Target Job Role / Career Goal</Text>
                 <TextInput
@@ -805,7 +811,7 @@ export default function ProfileScreen() {
                 />
               </View>
 
-              {/* College / Institution Field */}
+              {/* College */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>College / University</Text>
                 <TextInput
@@ -817,7 +823,7 @@ export default function ProfileScreen() {
                 />
               </View>
 
-              {/* Short Bio Field */}
+              {/* Bio */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Bio / Introduction</Text>
                 <TextInput
@@ -832,7 +838,7 @@ export default function ProfileScreen() {
               </View>
             </ScrollView>
 
-            {/* Modal Actions */}
+            {/* Modal Footer */}
             <View style={styles.modalFooter}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
@@ -865,17 +871,27 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  content: { paddingHorizontal: 20, paddingTop: 50, maxWidth: 1100, alignSelf: 'center', width: '100%' },
+  container: { flex: 1, backgroundColor: '#F5F7FF' },
+  content: { paddingHorizontal: 16, paddingTop: 20, maxWidth: 1100, alignSelf: 'center', width: '100%' },
 
+  /* Page Header */
   pageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
-  pageTitle: { fontSize: 30, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
-  pageSubtitle: { fontSize: 13, color: '#64748B', marginTop: 2 },
+  pageTitle: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: -0.5,
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: '#475569',
+    marginTop: 2,
+  },
   editProfileBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -884,35 +900,49 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  editProfileBtnText: { fontSize: 13, fontWeight: '700', color: Colors.light.tint },
-
-  /* Profile Card */
-  profileCard: {
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 24,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#E0E7FF',
+    shadowColor: 'rgba(79,70,229,0.08)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
     elevation: 2,
   },
-  profileHeaderRow: {
+  editProfileBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+
+  /* Profile Hero Card */
+  profileCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
+    marginBottom: 24,
+    shadowColor: 'rgba(79,70,229,0.08)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 3,
+    overflow: 'hidden',
+    padding: 20,
+  },
+  profileCardAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 5,
+    backgroundColor: '#4F46E5',
+  },
+  profileHeroRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
-    marginBottom: 16,
+    gap: 16,
+    marginBottom: 14,
+    marginTop: 10,
   },
   avatarWrapper: {
     position: 'relative',
@@ -924,14 +954,18 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     backgroundColor: '#E0F2FE',
+    borderWidth: 3,
+    borderColor: '#E0E7FF',
   },
   avatarPlaceholder: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#0284C7',
+    backgroundColor: '#4F46E5',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#E0E7FF',
   },
   avatarInitial: {
     fontSize: 32,
@@ -942,7 +976,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0,
     right: 0,
-    backgroundColor: Colors.light.tint,
+    backgroundColor: '#4F46E5',
     width: 26,
     height: 26,
     borderRadius: 13,
@@ -951,20 +985,15 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
-  profileTextInfo: {
+  profileHeroText: {
     flex: 1,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 4,
+    gap: 4,
   },
   userNameText: {
     fontSize: 22,
     fontWeight: '800',
     color: '#0F172A',
+    marginBottom: 2,
   },
   tierTag: {
     flexDirection: 'row',
@@ -974,6 +1003,8 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 10,
     borderWidth: 1,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
   },
   tierTagText: {
     fontSize: 11,
@@ -982,66 +1013,80 @@ const styles = StyleSheet.create({
   userEmailText: {
     fontSize: 13,
     color: '#64748B',
-    marginBottom: 8,
   },
   metaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    marginBottom: 14,
   },
   metaChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: '#F8FAFC',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 8,
+    backgroundColor: '#F5F7FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#E0E7FF',
   },
   metaChipText: {
     fontSize: 11,
     fontWeight: '600',
     color: '#334155',
   },
+
+  /* Bio */
   bioBox: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F5F7FF',
     padding: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: '#E0E7FF',
     marginBottom: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: '#4F46E5',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  bioQuote: {
+    fontSize: 24,
+    color: '#4F46E5',
+    lineHeight: 22,
+    fontWeight: '800',
+    marginTop: -4,
   },
   bioText: {
     fontSize: 13,
     color: '#475569',
     fontStyle: 'italic',
-    lineHeight: 18,
+    lineHeight: 19,
+    flex: 1,
   },
 
-  /* XP Level Card */
+  /* XP Card */
   xpCard: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F5F7FF',
     padding: 14,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#E0E7FF',
   },
   xpHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   levelBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#FEF3C7',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
   levelBadgeText: {
     fontSize: 12,
@@ -1058,7 +1103,7 @@ const styles = StyleSheet.create({
   },
   xpTrack: {
     height: 8,
-    backgroundColor: '#E2E8F0',
+    backgroundColor: '#E0E7FF',
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 6,
@@ -1078,8 +1123,8 @@ const styles = StyleSheet.create({
   },
   xpFooterRemaining: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#0284C7',
+    fontWeight: '700',
+    color: '#4F46E5',
   },
 
   /* Section Header */
@@ -1096,11 +1141,11 @@ const styles = StyleSheet.create({
   },
   sectionSubtitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: '#475569',
     fontWeight: '500',
   },
 
-  /* Statistics Grid */
+  /* Stats Grid */
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1112,18 +1157,18 @@ const styles = StyleSheet.create({
     minWidth: 150,
     backgroundColor: '#FFFFFF',
     padding: 16,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
+    borderColor: '#E0E7FF',
+    shadowColor: 'rgba(79,70,229,0.08)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
+    elevation: 2,
   },
   statIconBox: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -1146,19 +1191,19 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  /* Generic Card Section */
+  /* Card Section */
   cardSection: {
     backgroundColor: '#FFFFFF',
     padding: 20,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 24,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 5,
-    elevation: 1,
+    borderColor: '#E0E7FF',
+    marginBottom: 20,
+    shadowColor: 'rgba(79,70,229,0.08)',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 2,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1179,26 +1224,22 @@ const styles = StyleSheet.create({
   cardHeaderBadge: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.light.tint,
-    backgroundColor: '#E0F2FE',
+    color: '#4F46E5',
+    backgroundColor: '#E0E7FF',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
   },
   cardDescription: {
     fontSize: 12,
-    color: '#64748B',
+    color: '#475569',
     lineHeight: 18,
     marginBottom: 16,
   },
 
   /* Skill Items */
-  skillList: {
-    gap: 14,
-  },
-  skillItem: {
-    gap: 6,
-  },
+  skillList: { gap: 14 },
+  skillItem: { gap: 6 },
   skillHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1212,10 +1253,9 @@ const styles = StyleSheet.create({
   skillScoreText: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#0F172A',
   },
   skillBarTrack: {
-    height: 7,
+    height: 8,
     backgroundColor: '#F1F5F9',
     borderRadius: 4,
     overflow: 'hidden',
@@ -1225,12 +1265,12 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
 
-  /* Strengths & Growth Areas */
+  /* Strengths & Growth */
   strengthsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 14,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   strengthsCard: {
     flex: 1,
@@ -1252,15 +1292,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#166534',
   },
-  strengthsList: {
-    gap: 6,
-  },
+  strengthsList: { gap: 6 },
   strengthBullet: {
     fontSize: 12,
     color: '#14532D',
     lineHeight: 17,
   },
-
   growthCard: {
     flex: 1,
     minWidth: 260,
@@ -1281,9 +1318,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#854D0E',
   },
-  growthList: {
-    gap: 6,
-  },
+  growthList: { gap: 6 },
   growthBullet: {
     fontSize: 12,
     color: '#713F12',
@@ -1299,7 +1334,7 @@ const styles = StyleSheet.create({
   viewAllBadgesText: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.light.tint,
+    color: '#4F46E5',
   },
   badgesScroll: {
     paddingVertical: 10,
@@ -1314,10 +1349,10 @@ const styles = StyleSheet.create({
   },
   badgePillUnlocked: {
     backgroundColor: '#FFFFFF',
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
+    borderColor: '#E0E7FF',
+    shadowColor: 'rgba(79,70,229,0.08)',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
+    shadowOpacity: 1,
     shadowRadius: 4,
     elevation: 1,
   },
@@ -1340,15 +1375,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 2,
   },
-  badgeTitleUnlocked: {
-    color: '#0F172A',
-  },
-  badgeTitleLocked: {
-    color: '#94A3B8',
-  },
+  badgeTitleUnlocked: { color: '#0F172A' },
+  badgeTitleLocked: { color: '#94A3B8' },
   badgeCategoryTag: {
     fontSize: 10,
-    color: '#64748B',
+    color: '#475569',
     marginBottom: 8,
   },
   badgeStatusChip: {
@@ -1371,10 +1402,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 14,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F5F7FF',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#E0E7FF',
   },
   sessionItemLeft: {
     flex: 1,
@@ -1387,7 +1418,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   categoryPill: {
-    backgroundColor: '#E0F2FE',
+    backgroundColor: '#E0E7FF',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
@@ -1395,11 +1426,11 @@ const styles = StyleSheet.create({
   categoryPillText: {
     fontSize: 9,
     fontWeight: '800',
-    color: '#0369A1',
+    color: '#4F46E5',
   },
   sessionDateText: {
     fontSize: 11,
-    color: '#64748B',
+    color: '#475569',
   },
   sessionTopicText: {
     fontSize: 13,
@@ -1414,7 +1445,7 @@ const styles = StyleSheet.create({
   },
   sessionTurnsText: {
     fontSize: 11,
-    color: '#64748B',
+    color: '#475569',
   },
   scoreBadgePill: {
     paddingHorizontal: 6,
@@ -1434,12 +1465,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: '#E0E7FF',
   },
   reviewReportBtnText: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.light.tint,
+    color: '#4F46E5',
   },
   emptySessionsCard: {
     alignItems: 'center',
@@ -1453,14 +1484,14 @@ const styles = StyleSheet.create({
   },
   emptySessionsSubtitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: '#475569',
     textAlign: 'center',
     maxWidth: 280,
     lineHeight: 16,
   },
   startFirstBtn: {
     marginTop: 8,
-    backgroundColor: Colors.light.tint,
+    backgroundColor: '#4F46E5',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 12,
@@ -1471,10 +1502,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  /* Actions Menu */
-  actionsMenu: {
-    gap: 12,
-  },
+  /* Actions */
+  actionsMenu: { gap: 12 },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1482,11 +1511,11 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
+    borderColor: '#E0E7FF',
+    shadowColor: 'rgba(79,70,229,0.08)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 5,
     elevation: 1,
   },
   logoutButton: {
@@ -1494,16 +1523,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFBFB',
   },
   actionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 13,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
   },
-  actionTextCol: {
-    flex: 1,
-  },
+  actionTextCol: { flex: 1 },
   actionText: {
     fontSize: 14,
     fontWeight: '700',
@@ -1511,14 +1538,14 @@ const styles = StyleSheet.create({
   },
   actionSubtext: {
     fontSize: 11,
-    color: '#64748B',
+    color: '#475569',
     marginTop: 2,
   },
 
-  /* MODAL STYLES */
+  /* Modal */
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -1540,7 +1567,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 18,
+    marginBottom: 20,
+  },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  modalHeaderIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(79,70,229,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalTitle: {
     fontSize: 20,
@@ -1549,7 +1590,7 @@ const styles = StyleSheet.create({
   },
   modalSubtitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: '#475569',
     marginTop: 2,
   },
   modalCloseBtn: {
@@ -1574,26 +1615,26 @@ const styles = StyleSheet.create({
   },
   avatarOption: {
     position: 'relative',
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     borderWidth: 2,
     borderColor: '#E2E8F0',
     padding: 2,
   },
   avatarOptionSelected: {
-    borderColor: Colors.light.tint,
+    borderColor: '#4F46E5',
   },
   avatarOptionImg: {
     width: '100%',
     height: '100%',
-    borderRadius: 25,
+    borderRadius: 26,
   },
   avatarCheckBadge: {
     position: 'absolute',
     bottom: -2,
     right: -2,
-    backgroundColor: Colors.light.tint,
+    backgroundColor: '#4F46E5',
     width: 18,
     height: 18,
     borderRadius: 9,
@@ -1602,9 +1643,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#FFFFFF',
   },
-  inputGroup: {
-    marginBottom: 14,
-  },
+  inputGroup: { marginBottom: 14 },
   inputLabel: {
     fontSize: 12,
     fontWeight: '700',
@@ -1612,12 +1651,12 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   textInput: {
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+    backgroundColor: '#F5F7FF',
+    borderWidth: 1.5,
+    borderColor: '#E0E7FF',
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 11,
     fontSize: 13,
     color: '#0F172A',
   },
@@ -1660,7 +1699,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
+    borderTopColor: '#E0E7FF',
   },
   modalCancelBtn: {
     paddingHorizontal: 16,
@@ -1679,11 +1718,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: Colors.light.tint,
+    backgroundColor: '#4F46E5',
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   modalSaveText: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#FFFFFF',
   },
 

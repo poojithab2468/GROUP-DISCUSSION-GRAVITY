@@ -1,5 +1,14 @@
 import { PracticeSession, StrictRubricBreakdown, RubricCriterionScore } from '@/types/session';
 import { generateText } from '@rork-ai/toolkit-sdk';
+import {
+  computeTopicRelevance,
+  mineArguments,
+  analyseGrammar,
+  analyseFillerWords,
+  analyseSentenceQuality,
+  runFullNLPAnalysis,
+} from './NLPAnalysis';
+import { computeFluencyScore } from './FluencyAnalysis';
 
 export interface CalculatedReportMetrics {
   totalTurns: number;
@@ -36,15 +45,21 @@ export interface SessionLiveCameraStats {
   avgGestureScore?: number;
   avgStabilityScore?: number;
   dominantStress?: string;
+  // Fluency data from VoiceActivityDetector and PitchVariationAnalyser
+  silenceIntervalsMs?: number[];
+  pitchVariationIndex?: number;
+  pitchLabel?: string;
 }
 
 const COMMON_FILLERS = [
   'um', 'uh', 'like', 'you know', 'basically', 'actually', 'literally',
-  'so yeah', 'right', 'sort of', 'kind of', 'i mean', 'honestly'
+  'so yeah', 'right', 'sort of', 'kind of', 'i mean', 'honestly',
+  'anyway', 'you see', 'well uh', 'ok so', 'alright so', 'hmm',
 ];
 
 /**
- * Evaluates topic relevance by comparing candidate's spoken vocabulary against discussion topic keywords and domain themes
+ * Evaluates topic relevance using the upgraded NLPAnalysis module
+ * (cosine similarity + semantic expansion) instead of simple keyword matching.
  */
 function evaluateTopicRelevance(
   userText: string,
@@ -54,24 +69,15 @@ function evaluateTopicRelevance(
     return { relevanceRatio: 0, matchedKeywords: [], keySnippet: 'No contribution recorded.' };
   }
 
-  const cleanUser = userText.toLowerCase();
-  const topicWords = topic
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 3 && !['what', 'when', 'which', 'should', 'about', 'role', 'versus', 'impact'].includes(w));
-
-  const matchedKeywords = topicWords.filter(w => cleanUser.includes(w));
-  const relevanceRatio = topicWords.length > 0 ? matchedKeywords.length / topicWords.length : 0.5;
-
+  const nlp = computeTopicRelevance(userText, topic);
   const sentences = userText.split(/[.?!]+/).filter(s => s.trim().length > 10);
-  const relevantSentence = sentences.find(s =>
-    topicWords.some(w => s.toLowerCase().includes(w))
-  ) || sentences[0] || userText.slice(0, 90);
+  const keySnippet = (sentences[0] || userText).trim().slice(0, 110);
 
-  const keySnippet = relevantSentence.trim().slice(0, 110);
-
-  return { relevanceRatio, matchedKeywords, keySnippet };
+  return {
+    relevanceRatio: nlp.score,
+    matchedKeywords: nlp.matchedTopicKeywords,
+    keySnippet,
+  };
 }
 
 /**
@@ -213,40 +219,43 @@ export function computeSessionMetrics(
   };
 
   // 2. Quality of Arguments, Reasoning, and Examples (Max 20 Marks)
-  const reasoningKeywords = ['because', 'therefore', 'for instance', 'for example', 'evidence', 'impact', 'however', 'consequently', 'specifically', 'due to', 'since', 'result'];
-  const reasoningMatches = reasoningKeywords.filter(k => fullUserText.toLowerCase().includes(k));
+  //    Now uses NLP Argument Mining (Claim / Evidence / Reasoning detection)
+  const argMining = mineArguments(fullUserText);
+  const grammarResult = analyseGrammar(fullUserText);
 
   let argMarks = 0;
   let argExplanation = '';
   let argRec = '';
 
+  // Map argument mining score (0–100) → 20 marks
   if (totalUserWords < 25) {
     argMarks = 3;
     argExplanation = 'Lacked argumentative substance; bare assertions without backing.';
     argRec = 'State your claim, explain the underlying rationale, and back it with an example.';
-  } else if (reasoningMatches.length === 0) {
-    argMarks = 7;
-    argExplanation = 'Contained opinions or statements but lacked causal connectors or evidence.';
-    argRec = 'Use connecting phrases like "because", "due to", and "for instance" to substantiate points.';
-  } else if (reasoningMatches.length <= 2 || totalUserWords < 60) {
-    argMarks = 12;
-    argExplanation = 'Moderate reasoning demonstrated with basic cause-and-effect structure.';
-    argRec = 'Incorporate tangible examples from industry, market statistics, or real-world events.';
-  } else if (reasoningMatches.length <= 4 || totalUserWords < 120) {
-    argMarks = 16;
-    argExplanation = 'Strong analytical arguments with clear causal reasoning and practical examples.';
-    argRec = 'Add quantitative metrics or counter-evidence to elevate argument credibility.';
   } else {
-    argMarks = 19;
-    argExplanation = 'Superior argumentation with rigorous logic, structured reasoning, and supporting evidence.';
-    argRec = 'Continue leveraging structured frameworks like PEEL (Point, Explanation, Evidence, Link).';
+    // Scale 0–100 → 0–20 marks, blended with word count
+    const baseFromMining = Math.round((argMining.argumentScore / 100) * 18);
+    const wordLengthBonus = totalUserWords >= 120 ? 2 : totalUserWords >= 60 ? 1 : 0;
+    argMarks = Math.min(20, baseFromMining + wordLengthBonus);
+    argExplanation = argMining.qualityLabel + '. ' +
+      (argMining.hasClaim ? 'Claim: ✓ ' : 'Claim: ✗ ') +
+      (argMining.hasEvidence ? 'Evidence: ✓ ' : 'Evidence: ✗ ') +
+      (argMining.hasReasoning ? 'Reasoning: ✓' : 'Reasoning: ✗');
+    argRec = argMining.feedback;
   }
+
+  const reasoningKeywords = ['because', 'therefore', 'for instance', 'for example', 'evidence', 'impact', 'however', 'consequently', 'specifically', 'due to', 'since', 'result'];
+  const reasoningMatches = reasoningKeywords.filter(k => fullUserText.toLowerCase().includes(k));
 
   const argumentQuality: RubricCriterionScore = {
     score: argMarks,
     maxMarks: 20,
     explanation: argExplanation,
-    evidence: reasoningMatches.length > 0 ? `Utilized analytical connectors: ${reasoningMatches.join(', ')}` : 'No causal reasoning connectors detected.',
+    evidence: argMining.components.length > 0
+      ? `Argument components detected: ${argMining.components.map(c => c.type).join(' → ')}.`
+      : reasoningMatches.length > 0
+        ? `Reasoning connectors found: ${reasoningMatches.join(', ')}.`
+        : 'No clear argument structure detected.',
     recommendation: argRec,
   };
 
@@ -315,6 +324,31 @@ export function computeSessionMetrics(
       fluExplanation += ` Verbal crutches flagged: ${fillerWordsCount} instances.`;
     }
 
+    // Enrich with real-time fluency score from VoiceActivityDetector / PitchVariationAnalyser
+    if (liveCameraStats?.silenceIntervalsMs && liveCameraStats.silenceIntervalsMs.length > 0) {
+      type PitchLabel = 'Monotone' | 'Low Variation' | 'Moderate' | 'Expressive' | 'Erratic';
+      const validPitchLabels: PitchLabel[] = ['Monotone', 'Low Variation', 'Moderate', 'Expressive', 'Erratic'];
+      const rawLabel = liveCameraStats.pitchLabel ?? 'Moderate';
+      const pitchLabel: PitchLabel = (validPitchLabels as string[]).includes(rawLabel)
+        ? (rawLabel as PitchLabel)
+        : 'Moderate';
+      const richFluency = computeFluencyScore({
+        wpm,
+        silenceIntervalsMs: liveCameraStats.silenceIntervalsMs,
+        pitchResult: liveCameraStats.pitchVariationIndex !== undefined
+          ? { variationIndex: liveCameraStats.pitchVariationIndex, label: pitchLabel, feedback: '' }
+          : undefined,
+        fillerCount: fillerWordsCount,
+        totalWords: totalUserWords,
+      });
+      // Map compositeScore 0-100 → ±2 adjustment on existing baseFlu
+      const fluencyBias = richFluency.compositeScore >= 70 ? 2 : richFluency.compositeScore >= 50 ? 0 : -2;
+      baseFlu += fluencyBias;
+      if (liveCameraStats.pitchLabel) {
+        fluExplanation += ` Pitch variation: ${liveCameraStats.pitchLabel}.`;
+      }
+    }
+
     fluMarks = Math.min(15, Math.max(3, baseFlu));
     fluRec = fillerWordsCount > 2
       ? 'Replace verbal crutches like "um/like" with confident silent pauses.'
@@ -352,12 +386,18 @@ export function computeSessionMetrics(
     vocRec = 'Maintain concise precision without resorting to unnecessary jargon.';
   }
 
+  // Deduct 1 mark for grammar issues (NLP grammar analysis)
+  if (grammarResult && grammarResult.issuesFound.length > 0) {
+    vocMarks = Math.max(1, vocMarks - 1);
+    vocExplanation += ` Grammar note: ${grammarResult.issuesFound[0]}`;
+  }
+
   const vocabulary: RubricCriterionScore = {
-    score: vocMarks,
+    score: Math.min(10, vocMarks),
     maxMarks: 10,
     explanation: vocExplanation,
-    evidence: `Vocabulary Richness Ratio: ${vocabularyRichnessPct}% (${uniqueWords.size} unique terms out of ${totalUserWords} total words).`,
-    recommendation: vocRec,
+    evidence: `Vocabulary Richness: ${vocabularyRichnessPct}% (${uniqueWords.size} unique / ${totalUserWords} total words).${grammarResult.issuesFound.length > 0 ? ` Grammar: ${grammarResult.level}.` : ''}`,
+    recommendation: grammarResult.correctionHints.length > 0 ? grammarResult.correctionHints[0] : vocRec,
   };
 
   // 6. Active Participation and Meaningful Engagement (Max 10 Marks)
@@ -484,6 +524,54 @@ export function computeSessionMetrics(
     overallScore: totalScore,
     unlockedBadgeIds,
   };
+}
+
+/**
+ * Computes a secondary 6-criterion weighted score (20/20/20/15/15/10 = 100)
+ * alongside the existing 7-criterion rubric. Camera unavailability is handled
+ * by redistributing the Non-Verbal weight proportionally among remaining criteria.
+ *
+ * Returns a normalised score out of 100.
+ */
+export function computeWeightedScore(metrics: CalculatedReportMetrics): number {
+  const rb = metrics.rubricBreakdown;
+
+  // Map existing rubric criteria to the 6-criterion weighted model
+  // Existing: contentRelevance(25), argumentQuality(20), coherence(15),
+  //           fluency(15), vocabulary(10), activeParticipation(10), conciseness(5)
+  // Target:   ContentRelevance(20), ArgumentQuality(20), CommFluency(20),
+  //           GrammarVocab(15), Participation(15), NonVerbal(10)
+
+  const contentNorm = (rb.contentRelevance.score / 25) * 100;
+  const argumentNorm = (rb.argumentQuality.score / 20) * 100;
+  // Merge coherence + fluency → Communication & Fluency (20%)
+  const commFluencyNorm = ((rb.coherence.score / 15) * 0.5 + (rb.fluency.score / 15) * 0.5) * 100;
+  // Merge vocabulary + conciseness → Grammar & Vocabulary (15%)
+  const grammarVocNorm = ((rb.vocabulary.score / 10) * 0.7 + (rb.conciseness.score / 5) * 0.3) * 100;
+  const participNorm = (rb.activeParticipation.score / 10) * 100;
+
+  // Non-verbal: derive from camera data if available
+  const nonVerbalRaw = metrics.cameraActive && metrics.avgProfessionalismScore !== null
+    ? metrics.avgProfessionalismScore
+    : null;
+
+  interface Criterion { norm: number; weight: number; available: boolean }
+  const criteria: Criterion[] = [
+    { norm: contentNorm, weight: 0.20, available: true },
+    { norm: argumentNorm, weight: 0.20, available: true },
+    { norm: commFluencyNorm, weight: 0.20, available: true },
+    { norm: grammarVocNorm, weight: 0.15, available: true },
+    { norm: participNorm, weight: 0.15, available: true },
+    { norm: nonVerbalRaw ?? 0, weight: 0.10, available: nonVerbalRaw !== null },
+  ];
+
+  const available = criteria.filter(c => c.available);
+  if (available.length === 0) return 0;
+
+  const totalW = available.reduce((s, c) => s + c.weight, 0);
+  const weighted = available.reduce((s, c) => s + (c.norm * c.weight) / totalW, 0);
+
+  return Math.min(100, Math.max(0, Math.round(weighted)));
 }
 
 /**
